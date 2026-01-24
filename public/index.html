@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClearCycle</title>
+  <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    /* HEADER - Light blue background */
+    header {
+      background: #E6F2FF;
+      padding: 20px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #ddd;
+    }
+
+    header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: #123524;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .header-buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    .header-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      background: #2E7D32;
+      color: white;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .header-btn:hover {
+      background: #1b5e20;
+    }
+
+    .points-badge {
+      background: white;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-weight: 700;
+      font-size: 14px;
+      color: #2E7D32;
+      border: 2px solid #2E7D32;
+    }
+
+    /* TABS */
+    .tabs-container {
+      background: #E6F2FF;
+      padding: 0 40px 20px;
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .tab-btn {
+      padding: 10px 20px;
+      background: transparent;
+      border: 2px solid transparent;
+      color: #666;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+      transition: all 0.2s;
+      border-bottom: 2px solid transparent;
+    }
+
+    .tab-btn.active {
+      color: #2E7D32;
+      border-bottom: 2px solid #2E7D32;
+    }
+
+    .tab-btn:hover {
+      color: #2E7D32;
+    }
+
+    /* MAIN LAYOUT */
+    .container {
+      display: flex;
+      min-height: calc(100vh - 180px);
+    }
+
+    /* SIDEBAR - Left side with info cards */
+    .sidebar {
+      width: 220px;
+      background: white;
+      padding: 32px 16px;
+      border-right: 1px solid #ddd;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .sidebar-card {
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      border: 1px solid #ddd;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      min-height: 55px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+
+    /* MAIN CONTENT */
+    .main {
+      flex: 1;
+      padding: 40px;
+      background: white;
+      overflow-y: auto;
+    }
+
+    .page {
+      display: none;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    /* HOME PAGE */
+    .home-content {
+      max-width: 600px;
+    }
+
+    .home-title {
+      font-size: 32px;
+      font-weight: 700;
+      color: #123524;
+      margin-bottom: 16px;
+    }
+
+    .home-subtitle {
+      font-size: 15px;
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+
+    .home-btn {
+      background: #2E7D32;
+      color: white;
+      padding: 14px 36px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .home-btn:hover {
+      background: #1b5e20;
+    }
+
+    /* SCAN PAGE */
+    .scan-content {
+      max-width: 700px;
+    }
+
+    .camera-preview {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #000;
+      border-radius: 12px;
+      margin-bottom: 28px;
+      overflow: hidden;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .status-text {
+      text-align: center;
+      margin-bottom: 28px;
+      font-size: 15px;
+      color: #666;
+      min-height: 20px;
+      font-weight: 500;
+    }
+
+    .status-text.error {
+      color: #d32f2f;
+    }
+
+    .scan-btn {
+      width: 100%;
+      padding: 18px;
+      background: #2E7D32;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 16px;
+      cursor: pointer;
+      margin-bottom: 36px;
+      transition: all 0.2s;
+    }
+
+    .scan-btn:hover:not(:disabled) {
+      background: #1b5e20;
+    }
+
+    .scan-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .scan-steps {
+      background: #f9f9f9;
+      padding: 28px;
+      border-radius: 10px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .step-item {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 18px;
+      font-size: 14px;
+      text-align: left;
+    }
+
+    .step-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .step-dot {
+      width: 10px;
+      height: 10px;
+      background: #2E7D32;
+      border-radius: 50%;
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+
+    .step-text {
+      color: #666;
+      line-height: 1.4;
+    }
+
+    /* REDEEM PAGE */
+    .redeem-content {
+      max-width: 600px;
+    }
+
+    .points-box {
+      background: #E6F2FF;
+      padding: 36px;
+      border-radius: 12px;
+      text-align: center;
+      margin-bottom: 32px;
+      border: 1px solid #ddd;
+    }
+
+    .points-number {
+      font-size: 52px;
+      font-weight: 900;
+      color: #2E7D32;
+      margin-bottom: 6px;
+    }
+
+    .points-label {
+      color: #666;
+      font-size: 13px;
+    }
+
+    .progress-box {
+      background: #f9f9f9;
+      padding: 24px;
+      border-radius: 10px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: #666;
+      font-weight: 600;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 16px;
+      background: #e0e0e0;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: #2E7D32;
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      text-align: center;
+      font-size: 12px;
+      color: #666;
+    }
+
+    /* MODAL */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal.show {
+      display: flex;
+    }
+
+    .modal-box {
+      background: white;
+      padding: 32px;
+      border-radius: 14px;
+      max-width: 450px;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+
+    .modal-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: #123524;
+    }
+
+    .modal-text {
+      color: #666;
+      margin-bottom: 24px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .modal-image {
+      max-width: 100%;
+      max-height: 150px;
+      margin-bottom: 16px;
+      border-radius: 8px;
+    }
+
+    .modal-meta {
+      background: #f5f5f5;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 12px;
+      color: #666;
+      text-align: left;
+    }
+
+    .modal-form {
+      text-align: left;
+      margin-bottom: 16px;
+    }
+
+    .modal-input {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .modal-buttons {
+      display: flex;
+      gap: 12px;
+    }
+
+    .modal-btn {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .modal-confirm {
+      background: #2E7D32;
+      color: white;
+    }
+
+    .modal-confirm:hover {
+      background: #1b5e20;
+    }
+
+    .modal-cancel {
+      background: #f0f0f0;
+      color: #333;
+    }
+
+    .modal-cancel:hover {
+      background: #e0e0e0;
+    }
+
+    /* FOOTER */
+    footer {
+      background: #E6F2FF;
+      padding: 28px;
+      text-align: center;
+      border-top: 1px solid #ddd;
+    }
+
+    .footer-btn {
+      background: #2E7D32;
+      color: white;
+      padding: 12px 32px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .footer-btn:hover {
+      background: #1b5e20;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        flex-direction: column;
+      }
+      .sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid #ddd;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .sidebar-card {
+        flex: 1;
+        min-width: 140px;
+      }
+      .main {
+        padding: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- HEADER -->
+  <header>
+    <h1>ClearCycle</h1>
+    <div class="header-right">
+      <div class="points-badge" id="pointsBadge">0 pts</div>
+      <div class="header-buttons">
+        <button class="header-btn" title="Profile">👤</button>
+        <button class="header-btn" title="Rewards">⭐</button>
+        <button class="header-btn" title="Settings">⚙️</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- TABS -->
+  <div class="tabs-container">
+    <button class="tab-btn active" onclick="switchTab('home')">Home</button>
+    <button class="tab-btn" onclick="switchTab('scan')">Scan</button>
+    <button class="tab-btn" onclick="switchTab('redeem')">Redeem</button>
+  </div>
+
+  <!-- MAIN LAYOUT -->
+  <div class="container">
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="sidebar-card">Why ClearCycle?</div>
+      <div class="sidebar-card">Reduce Landfill Waste</div>
+      <div class="sidebar-card">Reward Sustainable Behavior</div>
+      <div class="sidebar-card">Simple Verification Flow</div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="main">
+      <!-- HOME PAGE -->
+      <div class="page active" id="page-home">
+        <div class="home-content">
+          <h2 class="home-title">Scan. Verify. Reward.</h2>
+          <p class="home-subtitle">
+            Every item you recycle earns 20 points. 100 points = $1 dining credit.
+            Use ClearCycle to verify your disposal and earn rewards instantly.
+          </p>
+          <button class="home-btn" onclick="switchTab('scan')">Start Scanning</button>
+        </div>
+      </div>
+
+      <!-- SCAN PAGE -->
+      <div class="page" id="page-scan">
+        <div class="scan-content">
+          <div class="camera-preview">
+            <video id="video" playsinline muted autoplay></video>
+          </div>
+
+          <div class="status-text" id="status">Ready to scan</div>
+
+          <button class="scan-btn" id="scanBtn" onclick="startScan()">Scan</button>
+
+          <div class="scan-steps">
+            <div class="step-item">
+              <div class="step-dot"></div>
+              <div class="step-text"><strong>Scan product barcode</strong> — Find the product</div>
+            </div>
+            <div class="step-item">
+              <div class="step-dot"></div>
+              <div class="step-text"><strong>Scan bin barcode</strong> — Confirm the bin</div>
+            </div>
+            <div class="step-item">
+              <div class="step-dot"></div>
+              <div class="step-text"><strong>Record 2-sec video</strong> — Verify disposal & earn points</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- REDEEM PAGE -->
+      <div class="page" id="page-redeem">
+        <div class="redeem-content">
+          <div class="points-box">
+            <div class="points-number" id="pointsDisplay">0</div>
+            <div class="points-label">points earned</div>
+          </div>
+
+          <div class="progress-box">
+            <div class="progress-header">
+              <span>Progress to next reward</span>
+              <span id="progressText">0 / 100</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressLabel">100 points to $1 credit</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <button class="footer-btn" onclick="alert('Contact us at hello@clearcycle.app')">Contact Us</button>
+  </footer>
+
+  <!-- MODAL -->
+  <div class="modal" id="modal">
+    <div class="modal-box">
+      <div class="modal-title" id="modalTitle">Confirm</div>
+      <img id="modalImage" class="modal-image" style="display: none;" />
+      <div class="modal-text" id="modalText">Is this correct?</div>
+      <div id="modalMeta" class="modal-meta" style="display: none;"></div>
+      
+      <div id="verificationButtons" class="modal-buttons">
+        <button class="modal-btn modal-confirm" onclick="confirmAction()">Yes</button>
+        <button class="modal-btn modal-cancel" onclick="cancelAction()">No</button>
+      </div>
+      
+      <div id="manualFormContainer" style="display: none;">
+        <div class="modal-form">
+          <input class="modal-input" id="manualName" placeholder="Product name (required)" />
+          <input class="modal-input" id="manualBrand" placeholder="Brand (optional)" />
+          <input class="modal-input" id="manualCategory" placeholder="Category (optional)" />
+        </div>
+        <div class="modal-buttons">
+          <button class="modal-btn modal-confirm" onclick="saveManualProduct()">Save</button>
+          <button class="modal-btn modal-cancel" onclick="cancelAction()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = 'http://localhost:4000';
+    const EMAIL = 'demo@clear.cycle';
+    const { BrowserMultiFormatReader } = ZXing;
+
+    let state = {
+      step: 'idle',
+      sessionId: null,
+      productBarcode: null,
+      binBarcode: null,
+      stream: null,
+      busy: false,
+      points: 0,
+      pendingAction: null,
+      lastProduct: null,
+    };
+
+    const video = document.getElementById('video');
+    const status = document.getElementById('status');
+    const scanBtn = document.getElementById('scanBtn');
+    const modal = document.getElementById('modal');
+    const reader = new BrowserMultiFormatReader();
+
+    function loadPoints() {
+      state.points = parseInt(localStorage.getItem('cc_points') || '0');
+      updateDisplay();
+    }
+
+    function updateDisplay() {
+      document.getElementById('pointsDisplay').textContent = state.points;
+      document.getElementById('pointsBadge').textContent = state.points + ' pts';
+      const ptsInCurrent = state.points % 100;
+      const ptsToNext = 100 - ptsInCurrent;
+      document.getElementById('progressText').textContent = `${ptsInCurrent} / 100`;
+      document.getElementById('progressFill').style.width = `${(ptsInCurrent / 100) * 100}%`;
+      document.getElementById('progressLabel').textContent = `${ptsToNext} points to $1 credit`;
+      localStorage.setItem('cc_points', state.points);
+    }
+
+    function switchTab(page) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.getElementById(`page-${page}`).classList.add('active');
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+
+    async function startCamera() {
+      if (state.stream) return;
+      try {
+        state.stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        });
+        video.srcObject = state.stream;
+      } catch (e) {
+        showError('Camera error: ' + e.message);
+      }
+    }
+
+    async function stopCamera() {
+      if (state.stream) {
+        state.stream.getTracks().forEach(t => t.stop());
+        state.stream = null;
+      }
+      try { reader.reset(); } catch {}
+    }
+
+    function showError(msg) {
+      status.classList.add('error');
+      status.textContent = msg;
+    }
+
+    function clearError() {
+      status.classList.remove('error');
+    }
+
+    async function lookupProduct(barcode) {
+      try {
+        const res = await fetch(`${API}/api/product?barcode=${encodeURIComponent(barcode)}`);
+        const data = await res.json();
+        
+        if (data.found) {
+          return {
+            found: true,
+            barcode: data.barcode,
+            name: data.name,
+            brand: data.brand || '',
+            category: data.category || '',
+            image: data.image || null,
+            source: data.source,
+            confidence: data.confidence,
+            needsVerification: data.needsVerification,
+          };
+        }
+        return { found: false, barcode, needsVerification: true };
+      } catch (e) {
+        showError('Lookup error: ' + e.message);
+        return { found: false, barcode, needsVerification: true };
+      }
+    }
+
+    async function scanBarcode() {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reader.reset();
+          reject(new Error('Scan timeout (20s)'));
+        }, 20000);
+
+        reader.decodeFromStream(state.stream, video, (result) => {
+          if (result) {
+            const text = result.getText();
+            if (text) {
+              clearTimeout(timer);
+              reader.reset();
+              resolve(text);
+            }
+          }
+        }).catch(() => {
+          clearTimeout(timer);
+          reject(new Error('Scan failed'));
+        });
+      });
+    }
+
+    async function recordVideo() {
+      const rec = new MediaRecorder(state.stream);
+      const chunks = [];
+      rec.ondataavailable = e => chunks.push(e.data);
+      rec.start();
+      await new Promise(r => setTimeout(r, 2000));
+      rec.stop();
+      return new Promise(r => {
+        rec.onstop = () => r(new Blob(chunks));
+      });
+    }
+
+    async function startScan() {
+      if (state.busy) return;
+      state.busy = true;
+      scanBtn.disabled = true;
+
+      try {
+        if (state.step === 'idle') {
+          status.textContent = 'Requesting camera...';
+          clearError();
+          await startCamera();
+          const res = await fetch(`${API}/api/recycle/session/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: EMAIL }),
+          }).then(r => r.json());
+          state.sessionId = res.sessionId;
+          state.step = 'product';
+          status.textContent = 'Scanning product barcode...';
+          state.busy = false;
+          scanBtn.disabled = false;
+          return;
+        }
+
+        if (state.step === 'product') {
+          status.textContent = 'Scanning...';
+          const code = await scanBarcode();
+          state.productBarcode = code;
+          
+          status.textContent = 'Looking up product...';
+          const product = await lookupProduct(code);
+          state.lastProduct = product;
+          
+          if (product.found && !product.needsVerification) {
+            const title = product.name || 'Product';
+            const details = (product.brand ? product.brand + ' • ' : '') + (product.category || 'Beverage');
+            showVerificationModal(title, details, 'confirmProduct', product);
+          } else if (product.found && product.needsVerification) {
+            const title = product.name || 'Product';
+            const details = product.brand || product.category || 'Product';
+            showVerificationModal(title, details, 'confirmProduct', product);
+          } else {
+            showManualFormModal('Add Product Manually', code, 'confirmProduct');
+          }
+          return;
+        }
+
+        if (state.step === 'bin') {
+          status.textContent = 'Scanning bin barcode...';
+          const code = await scanBarcode();
+          state.binBarcode = code;
+          status.textContent = 'Bin confirmed!';
+          showVerificationModal('Bin Scanned', `Barcode: ${code}`, 'confirmBin', { found: true });
+          return;
+        }
+
+        if (state.step === 'video') {
+          status.textContent = 'Recording...';
+          const blob = await recordVideo();
+          status.textContent = 'Uploading...';
+          const fd = new FormData();
+          fd.append('video', blob, `${Date.now()}.webm`);
+          fd.append('frames', '[]');
+          const res = await fetch(`${API}/api/recycle/session/${state.sessionId}/video`, {
+            method: 'POST',
+            body: fd,
+          }).then(r => r.json());
+          
+          if (res.verified) {
+            state.points += 20;
+            updateDisplay();
+            status.textContent = '✅ Verified! +20 points';
+          } else {
+            status.textContent = '❌ Not verified - try again';
+          }
+          await new Promise(r => setTimeout(r, 2000));
+          await stopCamera();
+          state.step = 'idle';
+          state.sessionId = null;
+          status.textContent = 'Ready to scan';
+          state.busy = false;
+          scanBtn.disabled = false;
+          return;
+        }
+      } catch (e) {
+        showError(e.message);
+      }
+
+      state.busy = false;
+      scanBtn.disabled = false;
+    }
+
+    function showVerificationModal(title, text, action, product) {
+      document.getElementById('modalTitle').textContent = title;
+      document.getElementById('modalText').textContent = text;
+      state.pendingAction = action;
+      
+      const img = document.getElementById('modalImage');
+      if (product && product.image) {
+        img.src = product.image;
+        img.style.display = 'block';
+      } else {
+        img.style.display = 'none';
+      }
+      
+      const meta = document.getElementById('modalMeta');
+      if (product && product.found) {
+        let metaText = '';
+        if (product.brand) metaText += `Brand: ${product.brand}<br>`;
+        if (product.category) metaText += `Category: ${product.category}`;
+        if (metaText) {
+          meta.innerHTML = metaText;
+          meta.style.display = 'block';
+        } else {
+          meta.style.display = 'none';
+        }
+      } else {
+        meta.style.display = 'none';
+      }
+      
+      document.getElementById('verificationButtons').style.display = 'flex';
+      document.getElementById('manualFormContainer').style.display = 'none';
+      modal.classList.add('show');
+    }
+
+    function showManualFormModal(title, barcode, action) {
+      document.getElementById('modalTitle').textContent = title;
+      document.getElementById('modalImage').style.display = 'none';
+      document.getElementById('modalText').textContent = 'Help us add this product:';
+      document.getElementById('modalMeta').style.display = 'none';
+      
+      state.pendingAction = action;
+      
+      document.getElementById('manualName').value = '';
+      document.getElementById('manualBrand').value = '';
+      document.getElementById('manualCategory').value = '';
+      
+      document.getElementById('verificationButtons').style.display = 'none';
+      document.getElementById('manualFormContainer').style.display = 'block';
+      modal.classList.add('show');
+    }
+
+    async function saveManualProduct() {
+      const name = document.getElementById('manualName').value.trim();
+      if (!name) {
+        showError('Product name is required');
+        return;
+      }
+      
+      const brand = document.getElementById('manualBrand').value.trim() || null;
+      const category = document.getElementById('manualCategory').value.trim() || null;
+      
+      try {
+        status.textContent = 'Saving product...';
+        const res = await fetch(`${API}/api/product`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            barcode: state.productBarcode,
+            name,
+            brand,
+            category,
+            lastVerified: true
+          })
+        }).then(r => r.json());
+        
+        if (res.saved) {
+          modal.classList.remove('show');
+          confirmAction();
+        }
+      } catch (e) {
+        showError('Error saving: ' + e.message);
+      }
+    }
+
+    async function confirmAction() {
+      modal.classList.remove('show');
+      
+      if (state.pendingAction === 'confirmProduct') {
+        status.textContent = 'Confirming product...';
+        await fetch(`${API}/api/recycle/session/${state.sessionId}/product`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode: state.productBarcode }),
+        }).then(r => r.json());
+        state.step = 'bin';
+        status.textContent = 'Ready to scan bin';
+        state.busy = false;
+        scanBtn.disabled = false;
+      } else if (state.pendingAction === 'confirmBin') {
+        status.textContent = 'Confirming bin...';
+        await fetch(`${API}/api/recycle/session/${state.sessionId}/bin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode: state.binBarcode }),
+        }).then(r => r.json());
+        state.step = 'video';
+        status.textContent = 'Recording 2-second video...';
+        await new Promise(r => setTimeout(r, 500));
+        await startScan();
+      }
+    }
+
+    function cancelAction() {
+      modal.classList.remove('show');
+      
+      if (state.pendingAction === 'confirmProduct') {
+        showManualFormModal('Add Product Manually', state.productBarcode, 'confirmProduct');
+        return;
+      }
+      
+      status.textContent = 'Ready to scan';
+      state.busy = false;
+      scanBtn.disabled = false;
+    }
+
+    loadPoints();
+  </script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "clearcycle-minimal",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "14.2.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "@zxing/browser": "^0.0.11",
+    "formidable": "^3.6.0",
+    "mongodb": "^5.8.0",
+    "mongoose": "^7.5.0",
+    "node-fetch": "^3.4.2"
+  }
+}
