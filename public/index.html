@@ -507,6 +507,7 @@
     <button class="tab-btn active" onclick="switchTab('home')">Home</button>
     <button class="tab-btn" onclick="switchTab('scan')">Scan</button>
     <button class="tab-btn" onclick="switchTab('redeem')">Redeem</button>
+    <button class="tab-btn" onclick="switchTab('admin')" style="margin-left: auto;">Admin</button>
   </div>
 
   <!-- MAIN LAYOUT -->
@@ -581,6 +582,24 @@
           </div>
         </div>
       </div>
+
+      <!-- ADMIN PAGE -->
+      <div class="page" id="page-admin">
+        <div class="scan-content">
+          <h2 class="home-title">Admin: Trash Cans</h2>
+          
+          <div style="background: #f9f9f9; padding: 24px; border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 32px;">
+            <h3 style="margin-bottom: 16px;">Create New Trash Can</h3>
+            <input type="text" id="adminCanId" placeholder="Can ID (e.g., TC001)" style="width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;" />
+            <input type="text" id="adminCanLabel" placeholder="Label (e.g., Alderman 1st Floor)" style="width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;" />
+            <input type="text" id="adminCanLocation" placeholder="Location (optional)" style="width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;" />
+            <button onclick="createTrashCan()" style="width: 100%; padding: 12px; background: #2E7D32; color: white; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;">Create Can</button>
+          </div>
+
+          <h3 style="margin-bottom: 16px;">All Trash Cans</h3>
+          <div id="adminCansList" style="background: white; border: 1px solid #e0e0e0; border-radius: 10px; max-height: 400px; overflow-y: auto;"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -631,13 +650,15 @@
       points: 0,
       pendingAction: null,
       lastProduct: null,
+      isScanning: false,
+      currentFormat: null, // 'barcode' or 'qr'
     };
 
     const video = document.getElementById('video');
     const status = document.getElementById('status');
     const scanBtn = document.getElementById('scanBtn');
     const modal = document.getElementById('modal');
-    const reader = new BrowserMultiFormatReader();
+    let reader = new BrowserMultiFormatReader();
 
     function loadPoints() {
       state.points = parseInt(localStorage.getItem('cc_points') || '0');
@@ -662,25 +683,70 @@
       event.target.classList.add('active');
     }
 
-    async function startCamera() {
-      if (state.stream) return;
+    async function stopScanning() {
+      console.log('[CAMERA] Stopping scanner and stream...');
+      state.isScanning = false;
+      
+      try { reader.reset(); } catch (e) {
+        console.log('[CAMERA] Reader reset error:', e);
+      }
+      
+      if (state.stream) {
+        console.log('[CAMERA] Stopping all video tracks...');
+        state.stream.getTracks().forEach(t => {
+          t.stop();
+          console.log('[CAMERA] Track stopped');
+        });
+        state.stream = null;
+      }
+      
+      video.srcObject = null;
+      console.log('[CAMERA] Camera fully stopped');
+    }
+
+    async function startCamera(format = 'barcode') {
+      console.log(`[CAMERA] Starting camera for ${format}...`);
+      
+      // If switching format, reset the reader even if stream is active
+      if (state.currentFormat && state.currentFormat !== format) {
+        console.log(`[CAMERA] Format change detected: ${state.currentFormat} → ${format}, resetting reader...`);
+        try { reader.reset(); } catch {}
+      }
+      
+      state.currentFormat = format;
+      
+      // Stream already active and same format? Just ensure video is playing
+      if (state.stream && state.stream.getTracks().length > 0) {
+        console.log('[CAMERA] Stream already active, ensuring video plays...');
+        if (video.paused) {
+          video.play().catch(e => console.log('[CAMERA] Video play error:', e));
+        }
+        return;
+      }
+      
       try {
+        console.log('[CAMERA] Requesting getUserMedia...');
         state.stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment' },
           audio: false,
         });
+        
+        console.log('[CAMERA] Stream acquired, attaching to video element...');
         video.srcObject = state.stream;
+        
+        // Ensure video plays
+        video.play().catch(e => console.log('[CAMERA] Video play error:', e));
+        
+        console.log('[CAMERA] Camera ready for', format);
       } catch (e) {
+        console.error('[CAMERA] Camera error:', e.message);
         showError('Camera error: ' + e.message);
+        throw e;
       }
     }
 
     async function stopCamera() {
-      if (state.stream) {
-        state.stream.getTracks().forEach(t => t.stop());
-        state.stream = null;
-      }
-      try { reader.reset(); } catch {}
+      await stopScanning();
     }
 
     function showError(msg) {
@@ -694,10 +760,21 @@
 
     async function lookupProduct(barcode) {
       try {
+        console.log('[DEBUG] Looking up barcode:', barcode);
+        console.log('[DEBUG] API endpoint:', `${API}/api/product?barcode=${encodeURIComponent(barcode)}`);
         const res = await fetch(`${API}/api/product?barcode=${encodeURIComponent(barcode)}`);
+        console.log('[DEBUG] Response status:', res.status);
+        
+        if (!res.ok) {
+          console.error('[DEBUG] Response not OK:', res.statusText);
+          return { found: false, barcode, needsVerification: true };
+        }
+        
         const data = await res.json();
+        console.log('[DEBUG] Response data:', JSON.stringify(data));
         
         if (data.found) {
+          console.log('[DEBUG] Product found:', data.name);
           return {
             found: true,
             barcode: data.barcode,
@@ -710,33 +787,77 @@
             needsVerification: data.needsVerification,
           };
         }
+        console.log('[DEBUG] Product NOT found in response');
         return { found: false, barcode, needsVerification: true };
       } catch (e) {
-        showError('Lookup error: ' + e.message);
+        console.error('[DEBUG] Lookup error:', e.message);
+        status.textContent = 'Lookup error: ' + e.message;
         return { found: false, barcode, needsVerification: true };
       }
     }
 
-    async function scanBarcode() {
+    async function scanBarcode(format = 'barcode') {
       return new Promise((resolve, reject) => {
+        let found = false;
+        let decodeControls = null;
+        
+        console.log(`[SCANNER] Starting decode for format: ${format}`);
+        
+        // Validate stream
+        if (!state.stream) {
+          console.error('[SCANNER] No stream available!');
+          reject(new Error('Camera stream not initialized'));
+          return;
+        }
+        
+        // Validate video element
+        if (!video.srcObject) {
+          console.error('[SCANNER] Video element has no source!');
+          reject(new Error('Video element not connected to stream'));
+          return;
+        }
+        
+        // Ensure video is playing
+        if (video.paused) {
+          console.log('[SCANNER] Video is paused, starting playback...');
+          video.play().catch(e => console.log('[SCANNER] Video play error:', e));
+        }
+        
+        state.isScanning = true;
+        
         const timer = setTimeout(() => {
-          reader.reset();
+          found = true;
+          state.isScanning = false;
+          if (decodeControls) {
+            try { decodeControls.stop(); } catch {}
+          }
+          console.log('[SCANNER] Scan timeout');
           reject(new Error('Scan timeout (20s)'));
         }, 20000);
 
-        reader.decodeFromStream(state.stream, video, (result) => {
-          if (result) {
-            const text = result.getText();
-            if (text) {
-              clearTimeout(timer);
-              reader.reset();
-              resolve(text);
+        try {
+          console.log('[SCANNER] Starting decode stream...');
+          decodeControls = reader.decodeFromStream(state.stream, video, (result) => {
+            if (result && !found) {
+              const text = result.getText();
+              if (text && text.length > 0) {
+                found = true;
+                state.isScanning = false;
+                clearTimeout(timer);
+                if (decodeControls) {
+                  try { decodeControls.stop(); } catch {}
+                }
+                console.log(`[SCANNER] Detected: ${text}`);
+                resolve(text);
+              }
             }
-          }
-        }).catch(() => {
+          });
+        } catch (err) {
           clearTimeout(timer);
-          reject(new Error('Scan failed'));
-        });
+          state.isScanning = false;
+          console.error('[SCANNER] Decode error:', err.message);
+          reject(new Error('Scan failed: ' + err.message));
+        }
       });
     }
 
@@ -754,6 +875,11 @@
 
     async function startScan() {
       if (state.busy) return;
+      if (state.isScanning) {
+        console.log('[SCAN] Already scanning, ignoring click');
+        return;
+      }
+      
       state.busy = true;
       scanBtn.disabled = true;
 
@@ -761,7 +887,8 @@
         if (state.step === 'idle') {
           status.textContent = 'Requesting camera...';
           clearError();
-          await startCamera();
+          console.log('[SCAN] Starting camera for product scan');
+          await startCamera('barcode');
           const res = await fetch(`${API}/api/recycle/session/start`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -777,7 +904,15 @@
 
         if (state.step === 'product') {
           status.textContent = 'Scanning...';
-          const code = await scanBarcode();
+          let code;
+          try {
+            code = await scanBarcode('barcode');
+          } catch (e) {
+            showError(e.message);
+            state.busy = false;
+            scanBtn.disabled = false;
+            return;
+          }
           state.productBarcode = code;
           
           status.textContent = 'Looking up product...';
@@ -800,16 +935,114 @@
 
         if (state.step === 'bin') {
           status.textContent = 'Scanning bin barcode...';
-          const code = await scanBarcode();
+          console.log('[SCAN] Switching to bin scan mode - doing hard camera reset');
+          
+          // HARD RESET: Stop all tracks, wait, restart completely
+          console.log('[SCAN] Stopping all video tracks...');
+          try { reader.reset(); } catch {}
+          if (state.stream) {
+            state.stream.getTracks().forEach(t => t.stop());
+            state.stream = null;
+          }
+          video.srcObject = null;
+          
+          console.log('[SCAN] Waiting 200ms before restart...');
+          await new Promise(r => setTimeout(r, 200));
+          
+          console.log('[SCAN] Restarting camera...');
+          await startCamera('qr');
+          
+          console.log('[SCAN] Camera restarted, ready to scan');
+          
+          let code;
+          try {
+            code = await scanBarcode('qr');
+          } catch (e) {
+            console.error('[SCAN] Bin scan error:', e);
+            showError(e.message);
+            state.busy = false;
+            scanBtn.disabled = false;
+            return;
+          }
           state.binBarcode = code;
           status.textContent = 'Bin confirmed!';
-          showVerificationModal('Bin Scanned', `Barcode: ${code}`, 'confirmBin', { found: true });
+          
+          // Extract canId from the scanned code (might be a full URL or just an ID)
+          let canId = code;
+          
+          // If it's a URL like "http://localhost:3000/can/TC001", extract TC001
+          const urlMatch = code.match(/\/can\/([^/?]+)/);
+          if (urlMatch) {
+            canId = decodeURIComponent(urlMatch[1]);
+            console.log('[BIN] Extracted canId from URL:', canId);
+          }
+          
+          // Hardcoded data for known trash cans (fallback)
+          const hardcodedCans = {
+            'TC001': {
+              found: true,
+              label: 'Outside Trash Can',
+              location: 'Smayans house',
+              image: '/uploads/outside-trash-can.png'
+            }
+          };
+          
+          // Start with hardcoded data if available
+          let binDetails = hardcodedCans[canId] || {
+            found: true,
+            label: 'Recycling Bin',
+            location: 'Unknown Location',
+            image: null
+          };
+          
+          console.log('[BIN] Scanned code:', code);
+          console.log('[BIN] Extracted canId:', canId);
+          console.log('[BIN] Initial binDetails:', binDetails);
+          
+          try {
+            const binRes = await fetch(`${API}/api/trash-cans/${encodeURIComponent(canId)}`);
+            console.log('[BIN] API response status:', binRes.status);
+            if (binRes.ok) {
+              const binData = await binRes.json();
+              console.log('[BIN] API data:', binData);
+              if (binData.can) {
+                binDetails = {
+                  found: true,
+                  label: binData.can.label || binDetails.label,
+                  location: binData.can.location || binDetails.location,
+                  image: binData.can.image ? `${API}${binData.can.image}` : binDetails.image
+                };
+                console.log('[BIN] Updated binDetails from API:', binDetails);
+              }
+            }
+          } catch (e) {
+            console.error('[BIN] Error fetching bin details:', e);
+          }
+          
+          console.log('[BIN] Final binDetails:', binDetails);
+          showVerificationModal(binDetails.label, `${binDetails.location}`, 'confirmBin', binDetails);
           return;
         }
 
         if (state.step === 'video') {
-          status.textContent = 'Recording...';
-          const blob = await recordVideo();
+          console.log('[VIDEO] Starting recording...');
+          status.textContent = 'Recording (2 seconds)...';
+          scanBtn.textContent = 'Recording...';
+          scanBtn.disabled = true;
+          
+          let blob;
+          try {
+            blob = await recordVideo();
+          } catch (e) {
+            console.error('[VIDEO] Recording failed:', e);
+            showError('Recording failed: ' + e.message);
+            state.busy = false;
+            scanBtn.disabled = false;
+            scanBtn.textContent = 'Record';
+            return;
+          }
+          
+          console.log('[VIDEO] Recording complete, uploading...');
           status.textContent = 'Uploading...';
           const fd = new FormData();
           fd.append('video', blob, `${Date.now()}.webm`);
@@ -818,6 +1051,8 @@
             method: 'POST',
             body: fd,
           }).then(r => r.json());
+          
+          console.log('[VIDEO] Upload complete:', res);
           
           if (res.verified) {
             state.points += 20;
@@ -831,16 +1066,16 @@
           state.step = 'idle';
           state.sessionId = null;
           status.textContent = 'Ready to scan';
+          scanBtn.textContent = 'Scan';
           state.busy = false;
           scanBtn.disabled = false;
           return;
         }
       } catch (e) {
         showError(e.message);
+        state.busy = false;
+        scanBtn.disabled = false;
       }
-
-      state.busy = false;
-      scanBtn.disabled = false;
     }
 
     function showVerificationModal(title, text, action, product) {
@@ -857,18 +1092,25 @@
       }
       
       const meta = document.getElementById('modalMeta');
-      if (product && product.found) {
-        let metaText = '';
-        if (product.brand) metaText += `Brand: ${product.brand}<br>`;
-        if (product.category) metaText += `Category: ${product.category}`;
-        if (metaText) {
-          meta.innerHTML = metaText;
-          meta.style.display = 'block';
-        } else {
-          meta.style.display = 'none';
-        }
+      let metaText = '';
+      
+      if (product && product.brand) metaText += `Brand: ${product.brand}<br>`;
+      if (product && product.category) metaText += `Category: ${product.category}`;
+      if (product && product.location && action === 'confirmBin') metaText += (metaText ? '<br>' : '') + `Location: ${product.location}`;
+      
+      if (metaText) {
+        meta.innerHTML = metaText;
+        meta.style.display = 'block';
       } else {
         meta.style.display = 'none';
+      }
+      
+      // Ensure camera stays live even when modal is open
+      if (state.stream && video.srcObject !== state.stream) {
+        video.srcObject = state.stream;
+      }
+      if (video.paused) {
+        video.play().catch(e => console.log('[DEBUG] Video play error:', e));
       }
       
       document.getElementById('verificationButtons').style.display = 'flex';
@@ -931,26 +1173,41 @@
       
       if (state.pendingAction === 'confirmProduct') {
         status.textContent = 'Confirming product...';
-        await fetch(`${API}/api/recycle/session/${state.sessionId}/product`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ barcode: state.productBarcode }),
-        }).then(r => r.json());
+        try {
+          await fetch(`${API}/api/recycle/session/${state.sessionId}/product`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ barcode: state.productBarcode }),
+          }).then(r => r.json());
+        } catch (e) {
+          showError('Error confirming product: ' + e.message);
+          state.busy = false;
+          scanBtn.disabled = false;
+          return;
+        }
         state.step = 'bin';
         status.textContent = 'Ready to scan bin';
         state.busy = false;
         scanBtn.disabled = false;
       } else if (state.pendingAction === 'confirmBin') {
         status.textContent = 'Confirming bin...';
-        await fetch(`${API}/api/recycle/session/${state.sessionId}/bin`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ barcode: state.binBarcode }),
-        }).then(r => r.json());
+        try {
+          await fetch(`${API}/api/recycle/session/${state.sessionId}/bin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ barcode: state.binBarcode }),
+          }).then(r => r.json());
+        } catch (e) {
+          showError('Error confirming bin: ' + e.message);
+          state.busy = false;
+          scanBtn.disabled = false;
+          return;
+        }
         state.step = 'video';
-        status.textContent = 'Recording 2-second video...';
-        await new Promise(r => setTimeout(r, 500));
-        await startScan();
+        status.textContent = 'Ready to record';
+        scanBtn.textContent = 'Record';
+        state.busy = false;
+        scanBtn.disabled = false;
       }
     }
 
@@ -966,6 +1223,97 @@
       state.busy = false;
       scanBtn.disabled = false;
     }
+
+    // Admin functions
+    async function createTrashCan() {
+      const id = document.getElementById('adminCanId').value.trim();
+      const label = document.getElementById('adminCanLabel').value.trim();
+      const location = document.getElementById('adminCanLocation').value.trim();
+
+      if (!id) {
+        alert('Can ID is required');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API}/api/trash-cans`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id,
+            label: label || null,
+            location: location || null
+          })
+        }).then(r => r.json());
+
+        if (res.saved) {
+          document.getElementById('adminCanId').value = '';
+          document.getElementById('adminCanLabel').value = '';
+          document.getElementById('adminCanLocation').value = '';
+          loadTrashCans();
+          alert('Trash can created!');
+        } else {
+          alert('Error: ' + (res.error || 'Unknown error'));
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    async function loadTrashCans() {
+      try {
+        const res = await fetch(`${API}/api/trash-cans`).then(r => r.json());
+        const container = document.getElementById('adminCansList');
+
+        if (!res.cans || res.cans.length === 0) {
+          container.innerHTML = '<p style="padding: 20px; text-align: center; color: #666;">No trash cans yet</p>';
+          return;
+        }
+
+        container.innerHTML = res.cans.map(can => `
+          <div style="padding: 16px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-weight: 700; color: #333;">${can.id}</div>
+              <div style="font-size: 12px; color: #666;">${can.label || 'No label'} • ${can.location || 'No location'}</div>
+            </div>
+            <button onclick="downloadQR('${can.id}')" style="padding: 8px 16px; background: #2E7D32; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 12px;">Download QR</button>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error('Error loading trash cans:', e);
+      }
+    }
+
+    async function downloadQR(canId) {
+      try {
+        const res = await fetch(`${API}/api/qr?canId=${encodeURIComponent(canId)}`);
+        if (!res.ok) {
+          alert('Error generating QR code');
+          return;
+        }
+
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `can-${canId}.png`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } catch (e) {
+        alert('Error downloading QR: ' + e.message);
+      }
+    }
+
+    // Load trash cans when switching to admin tab
+    const originalSwitchTab = switchTab;
+    switchTab = function(page) {
+      originalSwitchTab.call(this, page);
+      if (page === 'admin') {
+        loadTrashCans();
+      }
+    };
 
     loadPoints();
   </script>

@@ -10,7 +10,7 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
 const USE_MOCK = process.env.USE_MOCK_DB === 'true'
 const { fakeVerify } = require('./verify')
 
-let User, DisposalEvent, RecycleEvent, Product
+let User, DisposalEvent, RecycleEvent, Product, TrashCan, ScanEvent
 
 const app = express()
 app.use(cors())
@@ -21,7 +21,7 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/clearcycle
 
 if (USE_MOCK) {
   // Use in-memory mock models when USE_MOCK_DB=true
-  ;({ User, DisposalEvent, RecycleEvent, Product } = require('./mockModels'))
+  ;({ User, DisposalEvent, RecycleEvent, Product, TrashCan, ScanEvent } = require('./mockModels'))
   console.log('Running in MOCK DB mode — no MongoDB required')
 } else {
   const mongoose = require('mongoose')
@@ -37,6 +37,8 @@ if (USE_MOCK) {
   DisposalEvent = require('./models/DisposalEvent')
   RecycleEvent = require('./models/RecycleEvent')
   Product = require('./models/Product')
+  TrashCan = require('./models/TrashCan')
+  ScanEvent = require('./models/ScanEvent')
 }
 
 // Ensure uploads directory exists
@@ -66,6 +68,30 @@ async function ensureDemoUser() {
   if (!user) {
     user = await User.create({ name, email, diningCredits: 0 })
     console.log('Created demo user:', email)
+  }
+}
+
+// Seed trash cans from JSON database
+async function ensureTrashCans() {
+  try {
+    const trashCanPath = path.join(__dirname, 'trash-cans', 'trash-cans.json')
+    if (!fs.existsSync(trashCanPath)) {
+      console.log('No trash-cans.json found, skipping seeding')
+      return
+    }
+
+    const rawData = fs.readFileSync(trashCanPath, 'utf8')
+    const trashCans = JSON.parse(rawData)
+
+    for (const can of trashCans) {
+      const existing = await TrashCan.findOne({ id: can.id })
+      if (!existing) {
+        await TrashCan.create(can)
+        console.log(`Seeded trash can: ${can.id} - ${can.label}`)
+      }
+    }
+  } catch (err) {
+    console.error('Error seeding trash cans:', err.message)
   }
 }
 
@@ -777,9 +803,171 @@ app.post('/api/product', async (req, res) => {
   }
 })
 
-// Start server after seeding demo user
-ensureDemoUser().then(() => {
+// --- QR Code Routes ---
+
+// GET /api/qr?canId=TC001
+// Generate QR code PNG for a trash can
+app.get('/api/qr', async (req, res) => {
+  try {
+    const { canId } = req.query
+    if (!canId || typeof canId !== 'string') {
+      return res.status(400).json({ error: 'Missing canId' })
+    }
+
+    // Verify can exists (optional, demo mode allows any canId)
+    const can = await TrashCan.findOne({ id: canId }).catch(() => null)
+    if (!can && process.env.DEMO_MODE !== 'true') {
+      return res.status(404).json({ error: 'Trash can not found' })
+    }
+
+    // Generate QR code
+    const qrcode = require('qrcode')
+    const baseUrl = process.env.FRONTEND_BASE_URL || 'http://localhost:3000'
+    const qrUrl = `${baseUrl}/can/${encodeURIComponent(canId)}`
+    
+    const pngBuffer = await qrcode.toBuffer(qrUrl, { width: 300 })
+    
+    res.setHeader('Content-Type', 'image/png')
+    res.setHeader('Cache-Control', 'public, max-age=86400')
+    res.send(pngBuffer)
+  } catch (err) {
+    console.error('QR generation error:', err)
+    return res.status(500).json({ error: 'QR generation failed', details: err.message })
+  }
+})
+
+// GET /api/trash-cans
+// List all trash cans
+app.get('/api/trash-cans', async (req, res) => {
+  try {
+    let cans = await TrashCan.find().sort({ createdAt: -1 }).catch(() => [])
+    
+    // Fallback to JSON file if MongoDB is empty or unavailable
+    if (!cans || cans.length === 0) {
+      try {
+        const trashCanPath = path.join(__dirname, 'trash-cans', 'trash-cans.json')
+        if (fs.existsSync(trashCanPath)) {
+          const rawData = fs.readFileSync(trashCanPath, 'utf8')
+          cans = JSON.parse(rawData)
+        }
+      } catch (e) {
+        console.error('Error reading JSON fallback:', e)
+      }
+    }
+    
+    return res.json({ cans: cans || [] })
+  } catch (err) {
+    console.error('Error fetching trash cans:', err)
+    return res.status(500).json({ error: 'Server error', details: err.message })
+  }
+})
+
+// GET /api/trash-cans/:canId
+// Get a specific trash can
+app.get('/api/trash-cans/:canId', async (req, res) => {
+  try {
+    const { canId } = req.params
+    
+    // Try MongoDB first
+    let can = await TrashCan.findOne({ id: canId }).catch(() => null)
+    
+    // Fallback to JSON file if not in MongoDB
+    if (!can) {
+      try {
+        const trashCanPath = path.join(__dirname, 'trash-cans', 'trash-cans.json')
+        if (fs.existsSync(trashCanPath)) {
+          const rawData = fs.readFileSync(trashCanPath, 'utf8')
+          const trashCans = JSON.parse(rawData)
+          const jsonCan = trashCans.find(c => c.id === canId)
+          if (jsonCan) {
+            // Return JSON data formatted like MongoDB would
+            return res.json({ can: jsonCan })
+          }
+        }
+      } catch (e) {
+        console.error('Error reading JSON fallback:', e)
+      }
+    }
+    
+    if (!can) {
+      return res.status(404).json({ error: 'Trash can not found' })
+    }
+    
+    return res.json({ can })
+  } catch (err) {
+    console.error('Error fetching trash can:', err)
+    return res.status(500).json({ error: 'Server error', details: err.message })
+  }
+})
+
+// POST /api/trash-cans
+// Create a new trash can
+app.post('/api/trash-cans', async (req, res) => {
+  try {
+    const { id, label, location, image } = req.body
+    if (!id) {
+      return res.status(400).json({ error: 'Missing can id' })
+    }
+
+    // Check if already exists
+    const existing = await TrashCan.findOne({ id })
+    if (existing) {
+      return res.status(409).json({ error: 'Trash can id already exists' })
+    }
+
+    const can = await TrashCan.create({ id, label, location, image })
+    return res.json({ saved: true, can })
+  } catch (err) {
+    console.error('Error creating trash can:', err)
+    return res.status(500).json({ error: 'Server error', details: err.message })
+  }
+})
+
+// POST /api/scan-event
+// Log a scan event when user scans a trash can QR code
+app.post('/api/scan-event', async (req, res) => {
+  try {
+    const { trashCanId, userId, metadata } = req.body
+    if (!trashCanId) {
+      return res.status(400).json({ error: 'Missing trashCanId' })
+    }
+
+    // Verify can exists
+    const can = await TrashCan.findOne({ id: trashCanId }).catch(() => null)
+    if (!can && process.env.DEMO_MODE !== 'true') {
+      return res.status(404).json({ error: 'Trash can not found' })
+    }
+
+    const event = await ScanEvent.create({ trashCanId, userId, metadata })
+    return res.json({ logged: true, event })
+  } catch (err) {
+    console.error('Error logging scan event:', err)
+    return res.status(500).json({ error: 'Server error', details: err.message })
+  }
+})
+
+// GET /api/scan-events?canId=TC001
+// Get all scan events for a specific can
+app.get('/api/scan-events', async (req, res) => {
+  try {
+    const { canId } = req.query
+    if (!canId) {
+      return res.status(400).json({ error: 'Missing canId' })
+    }
+
+    const events = await ScanEvent.find({ trashCanId: canId }).sort({ scannedAt: -1 }).limit(100)
+    return res.json({ events })
+  } catch (err) {
+    console.error('Error fetching scan events:', err)
+    return res.status(500).json({ error: 'Server error', details: err.message })
+  }
+})
+
+// Start server after seeding demo user and trash cans
+Promise.all([ensureDemoUser(), ensureTrashCans()]).then(() => {
   app.listen(PORT, () => console.log(`Server listening on port ${PORT}`))
+}).catch(err => {
+  console.error('Startup error:', err)
 })
 
 // Anti-fraud notes (code comments):

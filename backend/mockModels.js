@@ -219,5 +219,74 @@ class Product {
 }
 
 const mockProducts = []
+const mockTrashCans = []
+let scanEventId = 1
 
-module.exports = { User, DisposalEvent, RecycleEvent, Product }
+class TrashCan {
+  constructor({ id, label, location, createdAt = Date.now() }) {
+    this._id = toObjectId(_eventId++)
+    this.id = id
+    this.label = label || null
+    this.location = location || null
+    this.createdAt = new Date(createdAt)
+  }
+
+  async save() {
+    const idx = mockTrashCans.findIndex((c) => c.id === this.id)
+    if (idx >= 0) mockTrashCans[idx] = this
+    else mockTrashCans.push(this)
+    return this
+  }
+
+  static async findOne(query) {
+    if (query.id) return mockTrashCans.find((c) => c.id === query.id) || null
+    return null
+  }
+
+  static async find() {
+    return mockTrashCans.slice()
+  }
+
+  static async create(obj) {
+    const c = new TrashCan(obj)
+    await c.save()
+    return c
+  }
+}
+
+class ScanEvent {
+  constructor({ trashCanId, scannedAt = Date.now(), userId = null, metadata = null }) {
+    this._id = `scan_${scanEventId++}`
+    this.trashCanId = trashCanId
+    this.scannedAt = new Date(scannedAt)
+    this.userId = userId
+    this.metadata = metadata
+  }
+
+  async save() {
+    // In-memory only, no persistence
+    return this
+  }
+
+  static async findOne(query) {
+    return null
+  }
+
+  static async find(query) {
+    return {
+      sort: (sortSpec) => ({
+        limit: (n) => ({
+          lean: async () => []
+        })
+      })
+    }
+  }
+
+  static async create(obj) {
+    const e = new ScanEvent(obj)
+    await e.save()
+    return e
+  }
+}
+
+module.exports = { User, DisposalEvent, RecycleEvent, Product, TrashCan, ScanEvent }

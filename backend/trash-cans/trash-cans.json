@@ -1,0 +1,10 @@
+[
+  {
+    "id": "TC001",
+    "label": "Outside Trash Can",
+    "location": "Smayans house",
+    "image": "/uploads/outside-trash-can.png",
+    "description": "Main outdoor trash can",
+    "createdAt": "2026-01-24T10:31:32.000Z"
+  }
+]
