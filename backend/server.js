@@ -5,6 +5,8 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
 
 const USE_MOCK = process.env.USE_MOCK_DB === 'true'
@@ -13,11 +15,21 @@ const { fakeVerify } = require('./verify')
 let User, DisposalEvent, RecycleEvent, Product, TrashCan, ScanEvent
 
 const app = express()
-app.use(cors())
+
+// CORS configuration - allow all origins for development
+app.use(cors({
+  origin: '*',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}))
+
 app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
 
 const PORT = process.env.PORT || 4000
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/clearcycle'
+const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_jwt_key_change_in_production'
 
 if (USE_MOCK) {
   // Use in-memory mock models when USE_MOCK_DB=true
@@ -95,6 +107,22 @@ async function ensureTrashCans() {
   }
 }
 
+// Fix existing @admin.com users: set role to admin in DB
+async function fixAdminRoles() {
+  if (USE_MOCK) return
+  try {
+    const result = await User.updateMany(
+      { email: /@admin\.com$/i, role: { $ne: 'admin' } },
+      { $set: { role: 'admin' } }
+    )
+    if (result.modifiedCount > 0) {
+      console.log(`Fixed ${result.modifiedCount} @admin.com user(s) to role: admin`)
+    }
+  } catch (err) {
+    console.error('Error fixing admin roles:', err.message)
+  }
+}
+
 // Helper to compute SHA256 hash of a file buffer (for duplicate detection)
 function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
@@ -145,6 +173,31 @@ async function uploadFileToS3IfConfigured({ filePath, contentType, key }) {
 
   const publicBase = normalizeBaseUrl(process.env.S3_PUBLIC_BASE_URL)
   return `${publicBase}/${key}`
+}
+
+// --- Authentication Middleware ---
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization']
+  const token = authHeader && authHeader.split(' ')[1]
+  
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' })
+  }
+  
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' })
+    }
+    req.user = user
+    next()
+  })
+}
+
+function authorizeAdmin(req, res, next) {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' })
+  }
+  next()
 }
 
 // --- Minimal in-memory rate limiting (hackathon-safe) ---
@@ -237,73 +290,216 @@ function extractJsonObject(text) {
 async function verifyFramesWithOpenRouter({ frames }) {
   const key = process.env.OPENROUTER_API_KEY
   if (!key) {
+    console.error('OPENROUTER_API_KEY not set!')
     return {
-      verified: true,
-      confidence: 0.5,
-      verdict: { pass: true, note: 'OPENROUTER_API_KEY not set; skipping vision verification.' }
+      verified: false,
+      confidence: 0,
+      verdict: { pass: false, notes: 'OPENROUTER_API_KEY not set; verification disabled.' }
     }
   }
 
-  const model = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'
+  const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
   const siteUrl = process.env.OPENROUTER_SITE_URL || 'http://localhost'
   const title = process.env.OPENROUTER_APP_TITLE || 'ClearCycle'
+  
+  console.log(`Calling OpenRouter API with model: ${model}, frames: ${frames.length}`)
 
   const system = [
     'You are a recycling verification system for a hackathon demo.',
     'You will receive 2-3 camera frames from a short verification video.',
     'Return ONLY strict JSON (no markdown, no extra text).',
-    'Required keys: bin_visible (boolean), bottle_visible (boolean), disposal_action (boolean), confidence (number 0..1), notes (string).',
-    'Also include pass (boolean) where pass=true only if all 3 booleans are true and confidence >= 0.65.'
+    'Required keys: bin_visible (boolean), bottle_visible (boolean), disposal_action (boolean), item_enters_bin (boolean), confidence (number 0..1), notes (string).',
+    'item_enters_bin should be true if the item (bottle/container) actually goes INTO the trash can or breaks the plane of the bin opening. It should be false if the item is just held near the bin or thrown away from it.',
+    'Also include pass (boolean) where pass=true only if all 4 booleans (bin_visible, bottle_visible, disposal_action, item_enters_bin) are true and confidence >= 0.65.'
   ].join('\n')
 
   const userContent = [
     {
       type: 'text',
-      text: 'Check if a recycling bin is visible, a bottle/container is visible, and the disposal action is happening (bottle entering bin).'
+      text: 'Analyze these video frames and verify: 1) A recycling bin/trash can is visible, 2) A bottle or container is visible, 3) A disposal action is happening (person throwing/disposing), and 4) The item actually enters the trash can or breaks the plane of the bin opening (not just held near it or thrown away). Return JSON with bin_visible, bottle_visible, disposal_action, item_enters_bin (all booleans), confidence (0-1), notes, and pass (true only if all checks pass with confidence >= 0.65).'
     },
     ...frames.map((url) => ({ type: 'image_url', image_url: { url } }))
   ]
 
-  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': siteUrl,
-      'X-Title': title
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: userContent }
-      ]
+  // Add timeout to OpenRouter API call
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+  
+  let resp, data
+  try {
+    resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': siteUrl,
+        'X-Title': title
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userContent }
+        ]
+      }),
+      signal: controller.signal
     })
-  })
-
-  const data = await resp.json().catch(() => ({}))
-  if (!resp.ok) {
+    clearTimeout(timeoutId)
+    
+    data = await resp.json().catch(() => ({}))
+    console.log('OpenRouter API response status:', resp.status)
+    
+    if (!resp.ok) {
+      console.error('OpenRouter API error:', data?.error || resp.statusText)
+      return {
+        verified: false,
+        confidence: 0,
+        verdict: { pass: false, notes: `OpenRouter API error: ${data?.error?.message || data?.error?.type || resp.statusText || 'unknown error'}` }
+      }
+    }
+  } catch (err) {
+    clearTimeout(timeoutId)
+    if (err.name === 'AbortError') {
+      console.error('OpenRouter API timeout')
+      return {
+        verified: false,
+        confidence: 0,
+        verdict: { pass: false, notes: 'Verification timeout - API took too long to respond' }
+      }
+    }
+    console.error('OpenRouter fetch error:', err.message)
     return {
       verified: false,
       confidence: 0,
-      verdict: { pass: false, notes: `OpenRouter error: ${data?.error?.message || resp.statusText || 'unknown'}` }
+      verdict: { pass: false, notes: 'OpenRouter API error: ' + err.message }
     }
   }
 
   const text = data?.choices?.[0]?.message?.content
+  console.log('OpenRouter response text (first 200 chars):', text?.substring(0, 200))
+  
   const obj = extractJsonObject(typeof text === 'string' ? text : JSON.stringify(text))
   if (!obj) {
+    console.error('Failed to parse JSON from OpenRouter response. Raw text:', text)
     return {
       verified: false,
       confidence: 0,
-      verdict: { pass: false, notes: 'Model response was not valid JSON.' }
+      verdict: { pass: false, notes: 'Model response was not valid JSON. Response: ' + (text?.substring(0, 100) || 'empty') }
     }
   }
 
+  console.log('Parsed verification object:', obj)
+  
   const confidence = Number(obj.confidence || 0)
-  const verified = Boolean(obj.pass === true)
-  return { verified, confidence, verdict: obj }
+  // Check for item_enters_bin field (new requirement)
+  const itemEntersBin = obj.item_enters_bin !== undefined ? Boolean(obj.item_enters_bin) : Boolean(obj.disposal_action)
+  // Pass requires all checks: bin visible, bottle visible, disposal action, AND item enters bin
+  const binVisible = Boolean(obj.bin_visible)
+  const bottleVisible = Boolean(obj.bottle_visible)
+  const disposalAction = Boolean(obj.disposal_action)
+  const allChecksPass = binVisible && bottleVisible && disposalAction && itemEntersBin
+  const verified = Boolean(obj.pass === true) && allChecksPass && confidence >= 0.65
+  
+  console.log('Verification checks:', {
+    binVisible,
+    bottleVisible,
+    disposalAction,
+    itemEntersBin,
+    allChecksPass,
+    confidence,
+    passFromModel: obj.pass,
+    finalVerified: verified
+  })
+  
+  return { 
+    verified, 
+    confidence, 
+    verdict: { 
+      ...obj, 
+      item_enters_bin: itemEntersBin,
+      bin_visible: binVisible,
+      bottle_visible: bottleVisible,
+      disposal_action: disposalAction,
+      pass: verified
+    } 
+  }
+}
+
+// Gemini API verification (alternative to OpenRouter)
+async function verifyFramesWithGemini({ frames }) {
+  const key = process.env.GEMINI_API_KEY
+  if (!key) {
+    // Fallback to OpenRouter if Gemini not configured
+    return await verifyFramesWithOpenRouter({ frames })
+  }
+
+  try {
+    // Convert data URLs to base64 strings (remove data:image/jpeg;base64, prefix)
+    const base64Images = frames.map(url => {
+      if (typeof url === 'string' && url.startsWith('data:')) {
+        return url.split(',')[1]
+      }
+      return url
+    })
+
+    // Use Gemini 1.5 Pro or Flash for vision
+    const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash'
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
+
+    const parts = [
+      {
+        text: 'You are a recycling verification system. Analyze these video frames and return ONLY valid JSON (no markdown, no extra text). Required keys: bin_visible (boolean), bottle_visible (boolean), disposal_action (boolean), confidence (number 0..1), notes (string). Include pass (boolean) where pass=true only if all 3 booleans are true and confidence >= 0.65. Check if a recycling bin is visible, a bottle/container is visible, and the disposal action is happening (bottle entering bin).'
+      },
+      ...base64Images.map(img => ({
+        inline_data: {
+          mime_type: 'image/jpeg',
+          data: img
+        }
+      }))
+    ]
+
+    const resp = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts }] })
+    })
+
+    const data = await resp.json()
+    if (!resp.ok) {
+      return {
+        verified: false,
+        confidence: 0,
+        verdict: { pass: false, notes: `Gemini API error: ${data?.error?.message || resp.statusText || 'unknown'}` }
+      }
+    }
+
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!text) {
+      return {
+        verified: false,
+        confidence: 0,
+        verdict: { pass: false, notes: 'No response from Gemini API' }
+      }
+    }
+
+    const obj = extractJsonObject(text)
+    if (!obj) {
+      return {
+        verified: false,
+        confidence: 0,
+        verdict: { pass: false, notes: 'Gemini response was not valid JSON.' }
+      }
+    }
+
+    const confidence = Number(obj.confidence || 0)
+    const verified = Boolean(obj.pass === true)
+    return { verified, confidence, verdict: obj }
+  } catch (err) {
+    console.error('Gemini verification error:', err)
+    // Fallback to OpenRouter on error
+    return await verifyFramesWithOpenRouter({ frames })
+  }
 }
 
 // Points mapping (configurable)
@@ -313,6 +509,144 @@ const POINTS_MAP = {
   food: 25, // food waste
   other: 15
 }
+
+// --- HEALTH CHECK ---
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), backend: 'running' })
+})
+
+app.get('/', (req, res) => {
+  res.json({ message: 'ClearCycle Backend is running!', version: '1.0.0' })
+})
+
+// --- AUTHENTICATION ROUTES ---
+
+// POST /api/auth/register
+// Register a new student or admin account
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body
+    console.log('Register request received:', { name, email, role })
+    
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Name, email, and password required' })
+    }
+
+    // Check if user already exists
+    const existing = await User.findOne({ email })
+    if (existing) {
+      return res.status(409).json({ error: 'Email already registered' })
+    }
+
+    // Determine role: Auto-detect admin if @admin.com email, otherwise use provided role or default to student
+    let userRole = 'student'
+    if (email.endsWith('@admin.com')) {
+      userRole = 'admin'
+      console.log('Email ends with @admin.com, setting role to admin')
+    } else if (role === 'admin') {
+      return res.status(400).json({ error: 'Admin accounts require @admin.com email address' })
+    }
+    
+    console.log('Final role for user:', userRole)
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10)
+    const hashedPassword = await bcrypt.hash(password, salt)
+
+    console.log('Creating user with role:', userRole)
+    
+    const user = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+      role: userRole
+    })
+
+    // Force role update for admin (ensure DB has it)
+    if (userRole === 'admin') {
+      await User.findByIdAndUpdate(user._id, { role: 'admin' })
+    }
+
+    const refreshedUser = await User.findById(user._id)
+    console.log('User created:', { id: refreshedUser._id, email: refreshedUser.email, role: refreshedUser.role })
+
+    // Generate token
+    const token = jwt.sign(
+      { id: refreshedUser._id, email: refreshedUser.email, name: refreshedUser.name, role: refreshedUser.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    )
+
+    const responseUser = { id: refreshedUser._id, name: refreshedUser.name, email: refreshedUser.email, role: refreshedUser.role, points: refreshedUser.points }
+    console.log('Sending response:', { success: true, user: responseUser })
+    
+    return res.json({
+      success: true,
+      user: responseUser,
+      token
+    })
+  } catch (err) {
+    console.error('Registration error:', err)
+    return res.status(500).json({ error: 'Server error', details: err.message })
+  }
+})
+
+// POST /api/auth/login
+// Login as student or admin
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' })
+    }
+
+    // Find user
+    const user = await User.findOne({ email })
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password' })
+    }
+
+    // Check password
+    const validPassword = await bcrypt.compare(password, user.password)
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Invalid email or password' })
+    }
+
+    // Generate token
+    const token = jwt.sign(
+      { id: user._id, email: user.email, name: user.name, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    )
+
+    return res.json({
+      success: true,
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, points: user.points },
+      token
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error', details: err.message })
+  }
+})
+
+// GET /api/auth/me
+// Get current user info (requires authentication)
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id)
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+
+    return res.json({
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, points: user.points }
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error', details: err.message })
+  }
+})
 
 // POST /api/upload
 // Accepts: form-data { image: file, itemType: string, email: string }
@@ -523,7 +857,48 @@ app.post('/api/recycle/session/:sessionId/video', recycleRateLimit, videoUpload.
     }
 
     const frames = parseDataUrlImages(req.body.frames)
-    const { verified, confidence, verdict } = await verifyFramesWithOpenRouter({ frames })
+    console.log(`Verifying video with ${frames.length} frames for session ${sessionId}`)
+    
+    if (!frames || frames.length === 0) {
+      console.warn('No frames provided, using fallback verification')
+      return res.json({
+        ok: true,
+        verified: false,
+        confidence: 0,
+        pointsAwarded: 0,
+        verdict: { pass: false, notes: 'No video frames provided for verification' },
+        videoUrl: `/uploads/${path.basename(req.file.path)}`,
+        error: 'No frames extracted from video'
+      })
+    }
+    
+    // Use OpenRouter (which can use Gemini model) if configured, otherwise fallback to Gemini direct
+    let verificationResult
+    try {
+      if (process.env.OPENROUTER_API_KEY) {
+        console.log('Using OpenRouter with Gemini for verification')
+        console.log(`API Key present: ${process.env.OPENROUTER_API_KEY.substring(0, 10)}...`)
+        console.log(`Model: ${process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'}`)
+        verificationResult = await verifyFramesWithOpenRouter({ frames })
+        console.log('OpenRouter verification complete:', {
+          verified: verificationResult.verified,
+          confidence: verificationResult.confidence,
+          pass: verificationResult.verdict?.pass
+        })
+      } else if (process.env.GEMINI_API_KEY) {
+        console.log('Using Gemini API directly for verification')
+        verificationResult = await verifyFramesWithGemini({ frames })
+      } else {
+        console.warn('No API key configured, verification will fail')
+        verificationResult = { verified: false, confidence: 0, verdict: { pass: false, notes: 'No API key configured - verification disabled' } }
+      }
+      console.log('Final verification result:', JSON.stringify(verificationResult, null, 2))
+    } catch (err) {
+      console.error('Verification error:', err)
+      verificationResult = { verified: false, confidence: 0, verdict: { pass: false, notes: 'Verification service error: ' + err.message } }
+    }
+    
+    const { verified, confidence, verdict } = verificationResult
 
     // Store (local) URL by default; optionally upload to S3-compatible object storage (Cloudflare R2, Supabase, etc.)
     let videoUrl = `/uploads/${path.basename(req.file.path)}`
@@ -561,12 +936,30 @@ app.post('/api/recycle/session/:sessionId/video', recycleRateLimit, videoUpload.
     // End session after upload attempt (pass or fail)
     recycleSessions.delete(sessionId)
 
+    console.log(`Video verification complete for session ${sessionId}: verified=${verified}, points=${pointsAwarded}, confidence=${confidence}`)
+    console.log('Verification details:', {
+      bin_visible: verdict?.bin_visible,
+      bottle_visible: verdict?.bottle_visible,
+      disposal_action: verdict?.disposal_action,
+      item_enters_bin: verdict?.item_enters_bin,
+      pass: verdict?.pass,
+      notes: verdict?.notes
+    })
+
+    // Always return a response - never hang
     return res.json({
       ok: true,
-      verified,
-      confidence,
-      pointsAwarded,
-      verdict,
+      verified: Boolean(verified),
+      confidence: Number(confidence || 0),
+      pointsAwarded: Number(pointsAwarded || 0),
+      verdict: verdict || { 
+        pass: Boolean(verified), 
+        notes: verified ? 'Video verified successfully' : 'Verification failed - check requirements',
+        bin_visible: false,
+        bottle_visible: false,
+        disposal_action: false,
+        item_enters_bin: false
+      },
       videoUrl,
       recycleEvent: event
     })
@@ -595,7 +988,19 @@ app.get('/api/history/:email', async (req, res) => {
 })
 
 // Health
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get('/api/health', (req, res) => {
+  const hasOpenRouter = !!process.env.OPENROUTER_API_KEY
+  const hasGemini = !!process.env.GEMINI_API_KEY
+  res.json({ 
+    ok: true, 
+    verification: {
+      openRouter: hasOpenRouter,
+      gemini: hasGemini,
+      model: process.env.OPENROUTER_MODEL || 'not set',
+      configured: hasOpenRouter || hasGemini
+    }
+  })
+})
 
 // Placeholder for Solana logging (optional)
 async function logToSolana(disposalEvent) {
@@ -657,32 +1062,98 @@ app.get('/api/product', async (req, res) => {
     let offfProduct = null
     try {
       const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}.json`
-      const response = await fetch(url, { timeout: 5000 })
+      // Use AbortController for timeout (Node.js fetch doesn't support timeout option)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+      
+      const response = await fetch(url, { 
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'ClearCycle/1.0 (https://clearcycle.app)'
+        }
+      })
+      clearTimeout(timeoutId)
+      
       if (response.ok) {
         const data = await response.json()
-        if (data.product) {
+        // Check if product exists (status 1 means found, 0 means not found)
+        if (data.status === 1 && data.product) {
           offfProduct = data.product
+          console.log(`OpenFoodFacts found product for barcode ${barcode}`)
+        } else {
+          console.log(`OpenFoodFacts: Product not found for barcode ${barcode} (status: ${data.status})`)
         }
+      } else {
+        console.log(`OpenFoodFacts API error: ${response.status} for barcode ${barcode}`)
       }
     } catch (err) {
-      console.error('OpenFoodFacts lookup error:', err)
+      if (err.name === 'AbortError') {
+        console.error(`OpenFoodFacts lookup timeout for barcode ${barcode}`)
+      } else {
+        console.error('OpenFoodFacts lookup error:', err.message)
+      }
     }
 
     if (offfProduct) {
-      const name = offfProduct.product_name || 'Unknown'
-      const brand = offfProduct.brands || ''
-      const category = offfProduct.categories || ''
+      // Try multiple field names for product name (OpenFoodFacts has variations)
+      // Check product_name first, then language-specific versions
+      let name = offfProduct.product_name || 
+                 offfProduct.product_name_en || 
+                 offfProduct.product_name_fr || 
+                 offfProduct.abbreviated_product_name ||
+                 offfProduct.generic_name ||
+                 offfProduct.name ||
+                 offfProduct.product_name_fr_imported ||
+                 ''
+      
+      // If name is empty or just whitespace, try other fields
+      if (!name || !name.trim()) {
+        name = offfProduct.product_name_en || 
+               offfProduct.product_name_fr || 
+               offfProduct.abbreviated_product_name ||
+               offfProduct.generic_name ||
+               ''
+      }
+      
+      // Clean up the name - remove extra whitespace and newlines
+      const cleanName = (name || '').trim().replace(/\s+/g, ' ') || 'Unknown'
+      
+      // Try multiple field names for brand
+      const brand = (offfProduct.brands || 
+                    offfProduct.brand || 
+                    offfProduct.brands_tags?.[0] || 
+                    '').trim()
+      
+      // Try multiple field names for category
+      let category = offfProduct.categories || 
+                     (offfProduct.categories_tags?.join(', ') || '') ||
+                     offfProduct.category || 
+                     ''
+      // Clean up category - take first few if comma-separated
+      if (category.includes(',')) {
+        category = category.split(',').slice(0, 3).join(', ').trim()
+      }
+      
       const quantity = offfProduct.quantity || null
-      const image = offfProduct.image_url || null
-      const confidence = computeConfidence(name, image)
+      
+      // Try multiple image URLs
+      const image = offfProduct.image_url || 
+                    offfProduct.image_front_url || 
+                    offfProduct.image_small_url ||
+                    (offfProduct.images?.front?.display?.url || null) ||
+                    null
+      
+      const confidence = computeConfidence(cleanName, image)
+      
+      console.log(`Product extracted: name="${cleanName}", brand="${brand}", category="${category}"`)
 
       // Save to local DB
       try {
         await Product.create({
           barcode,
-          name,
-          brand,
-          category,
+          name: cleanName,
+          brand: brand || null,
+          category: category || null,
           quantity,
           image,
           source: 'openfoodfacts',
@@ -693,12 +1164,31 @@ app.get('/api/product', async (req, res) => {
         console.error('Error saving product to DB:', err)
       }
 
+      // Make sure we have a valid name before returning
+      if (!cleanName || cleanName === 'Unknown' || cleanName.trim() === '') {
+        console.warn(`Warning: Product name is empty for barcode ${barcode}, using brand or fallback`)
+        // Try to use brand as name if name is missing
+        const fallbackName = (brand && brand.trim()) ? brand.trim() : `Product (Barcode: ${barcode})`
+        return res.json({
+          found: true,
+          barcode,
+          name: fallbackName,
+          brand: brand || null,
+          category: category || null,
+          quantity,
+          image,
+          source: 'openfoodfacts',
+          confidence,
+          needsVerification: confidence === 'low' || confidence === 'medium'
+        })
+      }
+      
       return res.json({
         found: true,
         barcode,
-        name,
-        brand,
-        category,
+        name: cleanName,
+        brand: brand || null,
+        category: category || null,
         quantity,
         image,
         source: 'openfoodfacts',
@@ -745,10 +1235,14 @@ app.get('/api/product', async (req, res) => {
       })
     }
 
-    // 4. Not found — return not found and let frontend show manual add form
+    // 4. Not found — return not found
+    console.log(`Product not found in any source for barcode ${barcode}`)
     return res.json({
       found: false,
       barcode,
+      name: null,
+      brand: null,
+      category: null,
       needsVerification: true
     })
   } catch (err) {
@@ -901,10 +1395,10 @@ app.get('/api/trash-cans/:canId', async (req, res) => {
 })
 
 // POST /api/trash-cans
-// Create a new trash can
-app.post('/api/trash-cans', async (req, res) => {
+// Create a new trash can (requires admin authentication)
+app.post('/api/trash-cans', authenticateToken, authorizeAdmin, upload.single('image'), async (req, res) => {
   try {
-    const { id, label, location, image } = req.body
+    const { id, label, location } = req.body
     if (!id) {
       return res.status(400).json({ error: 'Missing can id' })
     }
@@ -915,7 +1409,13 @@ app.post('/api/trash-cans', async (req, res) => {
       return res.status(409).json({ error: 'Trash can id already exists' })
     }
 
-    const can = await TrashCan.create({ id, label, location, image })
+    // Handle image if uploaded
+    let imageUrl = null
+    if (req.file) {
+      imageUrl = `/uploads/${path.basename(req.file.path)}`
+    }
+
+    const can = await TrashCan.create({ id, label, location, image: imageUrl })
     return res.json({ saved: true, can })
   } catch (err) {
     console.error('Error creating trash can:', err)
@@ -964,7 +1464,7 @@ app.get('/api/scan-events', async (req, res) => {
 })
 
 // Start server after seeding demo user and trash cans
-Promise.all([ensureDemoUser(), ensureTrashCans()]).then(() => {
+Promise.all([ensureDemoUser(), ensureTrashCans(), fixAdminRoles()]).then(() => {
   app.listen(PORT, () => console.log(`Server listening on port ${PORT}`))
 }).catch(err => {
   console.error('Startup error:', err)

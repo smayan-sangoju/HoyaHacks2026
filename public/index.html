@@ -1,1321 +1,1656 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ClearCycle</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = { corePlugins: { preflight: false } };
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f5f5f5;
-      color: #333;
-    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { width: 100%; min-width: 100%; overflow-x: hidden; }
+    body { width: 100%; min-width: 100%; min-height: 100vh; overflow-x: hidden; font-family: 'Inter', system-ui, sans-serif; background: #ffffff; margin: 0; padding: 0; }
 
-    /* HEADER - Light blue background */
-    header {
-      background: #E6F2FF;
-      padding: 20px 40px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #ddd;
-    }
+    .top-band { width: 100%; min-width: 100%; background: linear-gradient(135deg, #1A2341, #2D3A5C); border-bottom: 2px solid rgba(192,192,192,0.4); }
+    .header-wrap { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 16px 24px; gap: 16px; }
+    .header-left { justify-self: start; }
+    .header-center { justify-self: center; text-align: center; }
+    .header-right { justify-self: end; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .brand-link { display: inline-flex; align-items: center; gap: 14px; color: white; text-decoration: none; cursor: pointer; }
+    .brand-link:hover { opacity: 0.95; }
+    .brand-center { color: white; text-decoration: none; cursor: pointer; }
+    .brand-center:hover { opacity: 0.95; }
+    .georgetown-logo { width: 44px; height: 44px; flex-shrink: 0; display: block; }
+    .header-center h1 { font-size: clamp(22px, 4vw, 28px); font-weight: 800; color: white; margin: 0; }
+    .slogan { font-size: 13px; color: #c0c0c0; margin-top: 2px; }
+    .nav-dropdown { position: relative; }
+    .nav-trigger, .nav-item { background: #0D9488; color: white; border: none; border-radius: 10px; padding: 8px 16px; font-weight: 600; cursor: pointer; font-size: 13px; transition: all 0.2s ease; }
+    .nav-trigger:hover, .nav-item:hover { background: #0F766E; transform: translateY(-1px); }
+    .nav-dropdown.open .nav-trigger { background: #0F766E; box-shadow: 0 0 0 2px rgba(255,255,255,0.3); }
+    .nav-item.active { background: #2E8B57; text-decoration: underline; }
+    .simple-nav { display: flex; gap: 8px; align-items: center; }
+    .simple-nav-link { color: white; text-decoration: none; padding: 8px 16px; border-radius: 10px; font-weight: 600; font-size: 13px; transition: all 0.2s ease; }
+    .simple-nav-link:hover { background: rgba(255,255,255,0.15); }
+    .simple-nav-link.active { color: #2E8B57; text-decoration: underline; background: rgba(46,139,87,0.2); }
+    .nav-dropdown-menu { display: none; position: absolute; top: 100%; left: 0; margin-top: 8px; min-width: 168px; background: #f0fdfa; border: 1px solid #0D9488; border-radius: 12px; box-shadow: 0 12px 28px rgba(26,35,65,0.14); padding: 6px 0; z-index: 60; }
+    .nav-dropdown.open .nav-dropdown-menu { display: block; }
+    .nav-dropdown:last-of-type .nav-dropdown-menu { left: auto; right: 0; }
+    .nav-dropdown-menu button, .nav-dropdown-menu a { display: block; width: 100%; padding: 10px 16px; border: none; background: none; color: #1A2341; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; text-decoration: none; }
+    .nav-dropdown-menu button:hover, .nav-dropdown-menu a:hover { background: rgba(13,148,136,0.12); }
+    .btn-login { background: transparent; border: 2px solid #c0c0c0; color: white; border-radius: 10px; padding: 8px 14px; font-size: 18px; cursor: pointer; transition: all 0.2s; }
+    .btn-login:hover { background: rgba(255,255,255,0.15); }
+    .pts-badge { background: #0D9488; color: white; border: none; border-radius: 10px; padding: 8px 14px; font-weight: 700; font-size: 13px; cursor: default; white-space: nowrap; }
+    .g-logo-right { width: 40px; height: 40px; flex-shrink: 0; display: block; }
+    .profile-cards-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch; gap: 20px; margin-bottom: 32px; }
+    .profile-streak-card, .profile-points-card { background: linear-gradient(135deg, #1A2341, #2D3A5C); border-radius: 16px; border-left: 4px solid #2E8B57; padding: 32px; text-align: center; min-width: 200px; max-width: 280px; flex: 1 1 200px; }
+    .profile-streak-card .label, .profile-points-card .label { font-size: 12px; color: rgba(255,255,255,0.8); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .profile-streak-card .number, .profile-points-card .number { font-size: 64px; font-weight: 900; color: white; line-height: 1; margin-bottom: 4px; }
+    .profile-streak-card .suffix, .profile-points-card .suffix { font-size: 14px; color: rgba(255,255,255,0.9); }
+    .btn-scan-spruce { background: #2E8B57; color: white; padding: 18px 44px; border-radius: 14px; font-size: 18px; font-weight: 700; border: none; cursor: pointer; transition: all 0.25s ease; width: 100%; }
+    .btn-scan-spruce:hover { background: #247A48; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(46,139,87,0.35); }
+    .profile-intro { text-align: center; margin-bottom: 24px; }
+    .profile-intro h2 { font-size: clamp(20px, 3.5vw, 26px); font-weight: 800; color: #1A2341; margin-bottom: 8px; }
+    .profile-intro p { font-size: 14px; color: #2D3A5C; line-height: 1.5; }
+    .points-tracker-wrap { margin-bottom: 28px; }
+    .points-tracker-title { font-size: 14px; font-weight: 700; color: #1A2341; text-transform: uppercase; letter-spacing: 0.08em; text-align: center; margin-bottom: 8px; }
+    .points-tracker-number { font-size: 32px; font-weight: 900; color: #1A2341; text-align: center; margin-bottom: 12px; line-height: 1; }
+    .points-tracker-bar { position: relative; width: 100%; max-width: 560px; margin: 0 auto; height: 44px; background: linear-gradient(180deg, #2D3A5C, #1A2341); border-radius: 12px; overflow: visible; box-shadow: 0 4px 16px rgba(26,35,65,0.2); }
+    .points-tracker-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 12px 0 0 12px; background: linear-gradient(180deg, #2E8B57, #247A48); transition: width 0.35s ease; }
+    .points-tracker-cap { position: absolute; top: 0; bottom: 0; width: 4px; background: white; border-radius: 2px; transform: translateX(-50%); z-index: 2; box-shadow: 0 0 0 1px rgba(0,0,0,0.1); }
+    @media (max-width: 600px) { .points-tracker-number { font-size: 26px; } .points-tracker-bar { height: 36px; } }
+    .streak-bar { padding: 12px 24px; background: linear-gradient(90deg, #2D3A5C, #1A2341); color: #c0c0c0; font-weight: 600; font-size: 14px; }
+    .streak-bar span { color: #67e8f9; font-weight: 700; }
 
-    header h1 {
-      font-size: 28px;
-      font-weight: 700;
-      color: #123524;
-    }
+    .container { width: 100%; min-width: 100%; overflow-x: hidden; min-height: calc(100vh - 180px); display: block; }
+    .main { width: 100%; min-width: 100%; overflow-x: hidden; overflow-y: auto; display: block; }
+    .page { display: none; }
+    .page.active { display: block; }
 
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
+    .title-page { min-height: calc(100vh - 180px); width: 100%; min-width: 100%; padding: 48px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: linear-gradient(180deg, #1A2341 0%, #2D3A5C 40%, #0D9488 75%, #E8F5E9 100%); box-sizing: border-box; }
+    .title-page-name { font-size: clamp(40px, 8vw, 56px); color: white; font-weight: 800; margin-bottom: 28px; }
+    .scan-cta-main, .title-page-scan { background: white; color: #1A2341; padding: 18px 44px; border-radius: 14px; font-size: 18px; font-weight: 700; border: none; cursor: pointer; transition: all 0.25s ease; }
+    .scan-cta-main:hover, .title-page-scan:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+    .title-page-slogan { margin-top: 20px; color: #c0c0c0; }
 
-    .header-buttons {
-      display: flex;
-      gap: 10px;
-    }
-
-    .header-btn {
-      width: 44px;
-      height: 44px;
-      border-radius: 8px;
-      background: #2E7D32;
-      color: white;
-      border: none;
-      font-size: 20px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-    }
-
-    .header-btn:hover {
-      background: #1b5e20;
-    }
-
-    .points-badge {
-      background: white;
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-weight: 700;
-      font-size: 14px;
-      color: #2E7D32;
-      border: 2px solid #2E7D32;
-    }
-
-    /* TABS */
-    .tabs-container {
-      background: #E6F2FF;
-      padding: 0 40px 20px;
-      display: flex;
-      justify-content: center;
-      gap: 20px;
-    }
-
-    .tab-btn {
-      padding: 10px 20px;
-      background: transparent;
-      border: 2px solid transparent;
-      color: #666;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 14px;
-      transition: all 0.2s;
-      border-bottom: 2px solid transparent;
-    }
-
-    .tab-btn.active {
-      color: #2E7D32;
-      border-bottom: 2px solid #2E7D32;
-    }
-
-    .tab-btn:hover {
-      color: #2E7D32;
-    }
-
-    /* MAIN LAYOUT */
-    .container {
-      display: flex;
-      min-height: calc(100vh - 180px);
-    }
-
-    /* SIDEBAR - Left side with info cards */
-    .sidebar {
-      width: 220px;
-      background: white;
-      padding: 32px 16px;
-      border-right: 1px solid #ddd;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    .sidebar-card {
-      background: white;
-      padding: 16px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      color: #333;
-      border: 1px solid #ddd;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-      min-height: 55px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-    }
-
-    /* MAIN CONTENT */
-    .main {
-      flex: 1;
-      padding: 40px;
-      background: white;
-      overflow-y: auto;
-    }
-
-    .page {
-      display: none;
-    }
-
-    .page.active {
-      display: block;
-    }
-
-    /* HOME PAGE */
-    .home-content {
-      max-width: 600px;
-    }
-
-    .home-title {
-      font-size: 32px;
-      font-weight: 700;
-      color: #123524;
-      margin-bottom: 16px;
-    }
-
-    .home-subtitle {
-      font-size: 15px;
-      color: #666;
-      line-height: 1.6;
-      margin-bottom: 28px;
-    }
-
-    .home-btn {
-      background: #2E7D32;
-      color: white;
-      padding: 14px 36px;
-      border: none;
-      border-radius: 10px;
-      font-weight: 700;
-      font-size: 15px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .home-btn:hover {
-      background: #1b5e20;
-    }
-
-    /* SCAN PAGE */
-    .scan-content {
-      max-width: 700px;
-    }
-
-    .camera-preview {
-      width: 100%;
-      aspect-ratio: 4/3;
-      background: #000;
-      border-radius: 12px;
-      margin-bottom: 28px;
-      overflow: hidden;
-    }
-
-    video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    .status-text {
-      text-align: center;
-      margin-bottom: 28px;
-      font-size: 15px;
-      color: #666;
-      min-height: 20px;
-      font-weight: 500;
-    }
-
-    .status-text.error {
-      color: #d32f2f;
-    }
-
-    .scan-btn {
-      width: 100%;
-      padding: 18px;
-      background: #2E7D32;
-      color: white;
-      border: none;
-      border-radius: 12px;
-      font-weight: 700;
-      font-size: 16px;
-      cursor: pointer;
-      margin-bottom: 36px;
-      transition: all 0.2s;
-    }
-
-    .scan-btn:hover:not(:disabled) {
-      background: #1b5e20;
-    }
-
-    .scan-btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
-    .scan-steps {
-      background: #f9f9f9;
-      padding: 28px;
-      border-radius: 10px;
-      border: 1px solid #e0e0e0;
-    }
-
-    .step-item {
-      display: flex;
-      gap: 16px;
-      margin-bottom: 18px;
-      font-size: 14px;
-      text-align: left;
-    }
-
-    .step-item:last-child {
-      margin-bottom: 0;
-    }
-
-    .step-dot {
-      width: 10px;
-      height: 10px;
-      background: #2E7D32;
-      border-radius: 50%;
-      margin-top: 4px;
-      flex-shrink: 0;
-    }
-
-    .step-text {
-      color: #666;
-      line-height: 1.4;
-    }
-
-    /* REDEEM PAGE */
-    .redeem-content {
-      max-width: 600px;
-    }
-
-    .points-box {
-      background: #E6F2FF;
-      padding: 36px;
-      border-radius: 12px;
-      text-align: center;
-      margin-bottom: 32px;
-      border: 1px solid #ddd;
-    }
-
-    .points-number {
-      font-size: 52px;
-      font-weight: 900;
-      color: #2E7D32;
-      margin-bottom: 6px;
-    }
-
-    .points-label {
-      color: #666;
-      font-size: 13px;
-    }
-
-    .progress-box {
-      background: #f9f9f9;
-      padding: 24px;
-      border-radius: 10px;
-      border: 1px solid #e0e0e0;
-    }
-
-    .progress-header {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 12px;
-      font-size: 12px;
-      color: #666;
-      font-weight: 600;
-    }
-
-    .progress-bar {
-      width: 100%;
-      height: 16px;
-      background: #e0e0e0;
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 8px;
-    }
-
-    .progress-fill {
-      height: 100%;
-      background: #2E7D32;
-      transition: width 0.3s ease;
-    }
-
-    .progress-text {
-      text-align: center;
-      font-size: 12px;
-      color: #666;
-    }
-
-    /* MODAL */
-    .modal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.6);
-      z-index: 100;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .modal.show {
-      display: flex;
-    }
-
-    .modal-box {
-      background: white;
-      padding: 32px;
-      border-radius: 14px;
-      max-width: 450px;
-      text-align: center;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-    }
-
-    .modal-title {
-      font-size: 22px;
-      font-weight: 700;
-      margin-bottom: 12px;
-      color: #123524;
-    }
-
-    .modal-text {
-      color: #666;
-      margin-bottom: 24px;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    .modal-image {
-      max-width: 100%;
-      max-height: 150px;
-      margin-bottom: 16px;
-      border-radius: 8px;
-    }
-
-    .modal-meta {
-      background: #f5f5f5;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-      font-size: 12px;
-      color: #666;
-      text-align: left;
-    }
-
-    .modal-form {
-      text-align: left;
-      margin-bottom: 16px;
-    }
-
-    .modal-input {
-      width: 100%;
-      padding: 10px;
-      margin-bottom: 12px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      font-size: 14px;
-    }
-
-    .modal-buttons {
-      display: flex;
-      gap: 12px;
-    }
-
-    .modal-btn {
-      flex: 1;
-      padding: 12px;
-      border: none;
-      border-radius: 8px;
-      font-weight: 700;
-      cursor: pointer;
-      font-size: 14px;
-      transition: all 0.2s;
-    }
-
-    .modal-confirm {
-      background: #2E7D32;
-      color: white;
-    }
-
-    .modal-confirm:hover {
-      background: #1b5e20;
-    }
-
-    .modal-cancel {
-      background: #f0f0f0;
-      color: #333;
-    }
-
-    .modal-cancel:hover {
-      background: #e0e0e0;
-    }
-
-    /* FOOTER */
-    footer {
-      background: #E6F2FF;
-      padding: 28px;
-      text-align: center;
-      border-top: 1px solid #ddd;
-    }
-
-    .footer-btn {
-      background: #2E7D32;
-      color: white;
-      padding: 12px 32px;
-      border: none;
-      border-radius: 10px;
-      font-weight: 700;
-      font-size: 15px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .footer-btn:hover {
-      background: #1b5e20;
-    }
-
+    .why-clearcycle { width: 100%; min-width: 100%; padding: 56px 24px; background: #f8fafc; text-align: center; box-sizing: border-box; }
+    .why-heading { font-size: clamp(26px, 4vw, 34px); margin-bottom: 36px; font-weight: 800; color: #1A2341; }
+    .why-boxes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; max-width: 1100px; margin: 0 auto; padding: 0 12px; }
+    .why-box { background: #fff; border-radius: 18px; padding: 26px 22px; border: 2px solid #0D9488; transition: transform 0.25s ease, box-shadow 0.25s ease; }
+    .why-box:hover { transform: translateY(-6px); box-shadow: 0 14px 32px rgba(26,35,65,0.15); }
+    .why-box-icon { font-size: 28px; margin-bottom: 10px; }
+    .why-box-text { font-size: 14px; color: #2D3A5C; line-height: 1.5; }
+    @media (max-width: 900px) { .why-boxes { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 600px) { .why-boxes { grid-template-columns: 1fr; } }
     @media (max-width: 768px) {
-      .container {
-        flex-direction: column;
-      }
-      .sidebar {
-        width: 100%;
-        border-right: none;
-        border-bottom: 1px solid #ddd;
-        flex-direction: row;
-        flex-wrap: wrap;
-        gap: 12px;
-      }
-      .sidebar-card {
-        flex: 1;
-        min-width: 140px;
-      }
-      .main {
-        padding: 24px;
-      }
+      .header-wrap { grid-template-columns: 1fr; text-align: center; }
+      .header-left, .header-center, .header-right { justify-self: center; }
+      .header-right { flex-wrap: wrap; justify-content: center; }
     }
+
+    .scan-content, .redeem-content { max-width: 600px; margin: 0 auto; padding: 24px; }
+    .camera-preview { width: 100%; aspect-ratio: 4/3; background: #111; border-radius: 14px; margin-bottom: 24px; overflow: hidden; }
+    .camera-preview video { width: 100%; height: 100%; object-fit: cover; }
+    .status-text { text-align: center; margin-bottom: 24px; font-size: 15px; color: #1A2341; font-weight: 500; }
+    .scan-btn { width: 100%; padding: 18px; background: #0D9488; color: white; border: none; border-radius: 14px; font-weight: 700; font-size: 17px; cursor: pointer; transition: all 0.25s ease; }
+    .scan-btn:hover:not(:disabled) { background: #0F766E; transform: translateY(-1px); }
+    .scan-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .scan-steps { background: #f0fdfa; padding: 24px; border-radius: 14px; border: 2px solid #0D9488; margin-top: 24px; }
+    .step-item { display: flex; gap: 12px; margin-bottom: 12px; font-size: 14px; color: #1A2341; }
+    .step-dot { width: 10px; height: 10px; background: #0D9488; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+
+    .points-box { background: #f0fdfa; padding: 32px; border-radius: 16px; text-align: center; margin-bottom: 24px; border: 2px solid #0D9488; }
+    .points-number { font-size: 48px; font-weight: 900; color: #1A2341; }
+    .points-label { font-size: 13px; color: #2D3A5C; }
+    .home-title { font-size: clamp(22px, 3.5vw, 28px); font-weight: 800; color: #1A2341; margin-bottom: 12px; }
+    .home-subtitle { font-size: 14px; color: #2D3A5C; line-height: 1.5; margin-bottom: 20px; }
+
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
+    .modal.show { display: flex; }
+    .modal-box { background: white; padding: 28px 32px; border-radius: 16px; max-width: 440px; width: 100%; box-shadow: 0 20px 56px rgba(0,0,0,0.2); }
+    .modal-title { font-size: 22px; font-weight: 700; margin-bottom: 12px; color: #1A2341; }
+    .modal-text { color: #2D3A5C; margin-bottom: 20px; font-size: 14px; line-height: 1.5; }
+    .modal-input { width: 100%; padding: 12px 14px; margin-bottom: 12px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; }
+    .modal-input:focus { outline: none; border-color: #0D9488; box-shadow: 0 0 0 3px rgba(13,148,136,0.15); }
+    .modal-buttons { display: flex; gap: 12px; }
+    .modal-btn { flex: 1; padding: 12px 16px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 14px; }
+    .modal-confirm { background: #0D9488; color: white; }
+    .modal-confirm:hover { background: #0F766E; }
+    .modal-cancel { background: #e5e7eb; color: #1A2341; }
+    .modal-cancel:hover { background: #d1d5db; }
+
+    .product-modal-box { background: white; padding: 28px 32px; border-radius: 20px; max-width: 420px; width: 100%; box-shadow: 0 20px 56px rgba(0,0,0,0.3); text-align: center; }
+    .product-modal-title { font-size: 20px; font-weight: 800; color: #1B5E20; margin-bottom: 16px; line-height: 1.3; }
+    .product-modal-img-wrap { margin-bottom: 16px; min-height: 120px; display: flex; align-items: center; justify-content: center; }
+    .product-modal-img { max-width: 160px; max-height: 160px; object-fit: contain; border-radius: 12px; }
+    .product-modal-brand { font-size: 16px; font-weight: 600; color: #1A2341; margin-bottom: 12px; }
+    .product-modal-desc { background: #f5f5f5; color: #1A2341; font-size: 13px; line-height: 1.6; padding: 16px 18px; border-radius: 12px; margin-bottom: 24px; text-align: left; }
+    .product-modal-btns { display: flex; gap: 12px; }
+    .product-modal-btn-yes { flex: 1; padding: 14px 20px; background: #1B5E20; color: white; border: none; border-radius: 12px; font-weight: 700; font-size: 15px; cursor: pointer; transition: all 0.2s ease; }
+    .product-modal-btn-yes:hover { background: #2E7D32; transform: translateY(-1px); }
+    .product-modal-btn-no { flex: 1; padding: 14px 20px; background: #e5e7eb; color: #1A2341; border: none; border-radius: 12px; font-weight: 700; font-size: 15px; cursor: pointer; transition: all 0.2s ease; }
+    .product-modal-btn-no:hover { background: #d1d5db; }
+
+    footer { width: 100%; min-width: 100%; padding: 28px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 24px; background: #E0F2FE; border-top: 2px solid #0EA5E9; box-sizing: border-box; }
+    .footer-credits { font-size: 13px; color: #64748b; }
+    .footer-btn { background: #0D9488; color: white; padding: 14px 32px; border: none; border-radius: 12px; font-weight: 700; font-size: 15px; cursor: pointer; transition: all 0.25s ease; }
+    .footer-btn:hover { background: #0F766E; transform: translateY(-1px); }
+
+    #loginDropdown { display: none; position: absolute; top: 100%; right: 0; margin-top: 8px; min-width: 140px; background: #f0fdfa; border: 1px solid #0D9488; border-radius: 12px; box-shadow: 0 12px 28px rgba(26,35,65,0.14); padding: 6px 0; z-index: 60; }
+    #loginDropdown.open { display: block; }
+    #loginDropdown button { display: block; width: 100%; padding: 10px 16px; border: none; background: none; color: #1A2341; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; }
+    #loginDropdown button:hover { background: rgba(13,148,136,0.12); }
+    .login-wrap { position: relative; }
   </style>
 </head>
 <body>
-  <!-- HEADER -->
-  <header>
-    <h1>ClearCycle</h1>
-    <div class="header-right">
-      <div class="points-badge" id="pointsBadge">0 pts</div>
-      <div class="header-buttons">
-        <button class="header-btn" title="Profile">👤</button>
-        <button class="header-btn" title="Rewards">⭐</button>
-        <button class="header-btn" title="Settings">⚙️</button>
-      </div>
-    </div>
-  </header>
 
-  <!-- TABS -->
-  <div class="tabs-container">
-    <button class="tab-btn active" onclick="switchTab('home')">Home</button>
-    <button class="tab-btn" onclick="switchTab('scan')">Scan</button>
-    <button class="tab-btn" onclick="switchTab('redeem')">Redeem</button>
-    <button class="tab-btn" onclick="switchTab('admin')" style="margin-left: auto;">Admin</button>
+  <div class="top-band">
+    <div class="header-wrap">
+      <div class="header-left">
+        <a class="brand-link" href="#" onclick="switchTab('home'); return false;" aria-label="Home">
+          <svg class="georgetown-logo" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <text x="28" y="40" font-size="42" font-weight="bold" text-anchor="middle" fill="#ffffff" stroke="#88878C" stroke-width="2" font-family="Georgia, serif">G</text>
+          </svg>
+        </a>
+      </div>
+      <div class="header-center">
+        <a class="brand-center" href="#" onclick="switchTab('home'); return false;">
+          <h1>ClearCycle</h1>
+          <p class="slogan">Scan. Verify. Reward.</p>
+        </a>
+      </div>
+      <nav class="header-right">
+        <span class="pts-badge" id="headerPts" style="display:none;">0 pts</span>
+        <div class="simple-nav">
+          <a href="#" class="simple-nav-link" id="navHome" onclick="switchTab('home'); return false;">Home</a>
+          <a href="#" class="simple-nav-link" id="navScan" onclick="switchTab('scan'); return false;">Scan</a>
+          <a href="#" class="simple-nav-link" id="navRedeem" onclick="switchTab('redeem'); return false;">Redeem</a>
+          <a href="#" class="simple-nav-link" id="navAdmin" onclick="switchTab('admin'); return false;" style="display:none;">Admin</a>
+        </div>
+        <div class="nav-dropdown" id="navProfile" style="display:none;">
+          <button type="button" class="nav-trigger">Profile</button>
+          <div class="nav-dropdown-menu">
+            <button type="button" onclick="switchTab('profile'); closeAllDropdowns();">profile</button>
+            <button type="button" onclick="switchTab('redeem'); closeAllDropdowns();">redeem</button>
+          </div>
+        </div>
+        <div class="nav-dropdown" id="navSettings" style="display:none;">
+          <button type="button" class="nav-trigger">Settings</button>
+          <div class="nav-dropdown-menu">
+            <button type="button" onclick="toggleProfileOrLogin(); closeAllDropdowns();">account</button>
+            <button type="button" onclick="switchTab('settings'); closeAllDropdowns();">app info</button>
+            <button type="button" onclick="logout(); closeAllDropdowns();">log out</button>
+          </div>
+        </div>
+        <div class="login-wrap">
+          <button type="button" class="btn-login" id="btnLogin" onclick="toggleLoginDropdown()" title="Log in">👤 Log in</button>
+          <div id="loginDropdown">
+            <button type="button" id="loginDropdownLogin" onclick="toggleProfileOrLogin(); closeLoginDropdown();">Log in</button>
+            <button type="button" id="btnSignOut" onclick="logout(); closeLoginDropdown();" style="display:none;">Sign Out</button>
+          </div>
+        </div>
+      </nav>
+    </div>
+    <div class="streak-bar">Current Streak: <span id="streakDays">0</span> Days</div>
   </div>
 
-  <!-- MAIN LAYOUT -->
   <div class="container">
-    <!-- SIDEBAR -->
-    <div class="sidebar">
-      <div class="sidebar-card">Why ClearCycle?</div>
-      <div class="sidebar-card">Reduce Landfill Waste</div>
-      <div class="sidebar-card">Reward Sustainable Behavior</div>
-      <div class="sidebar-card">Simple Verification Flow</div>
-    </div>
-
-    <!-- MAIN CONTENT -->
-    <div class="main">
-      <!-- HOME PAGE -->
+    <main class="main">
       <div class="page active" id="page-home">
-        <div class="home-content">
-          <h2 class="home-title">Scan. Verify. Reward.</h2>
-          <p class="home-subtitle">
-            Every item you recycle earns 20 points. 100 points = $1 dining credit.
-            Use ClearCycle to verify your disposal and earn rewards instantly.
-          </p>
-          <button class="home-btn" onclick="switchTab('scan')">Start Scanning</button>
-        </div>
+        <section class="title-page">
+          <h1 class="title-page-name">ClearCycle</h1>
+          <button type="button" class="scan-cta-main title-page-scan" onclick="switchTab('scan')">Scan</button>
+          <p class="title-page-slogan">Scan. Verify. Reward.</p>
+        </section>
+        <section class="why-clearcycle">
+          <h2 class="why-heading">Why ClearCycle</h2>
+          <div class="why-boxes">
+            <div class="why-box"><div class="why-box-icon">♻️</div><p class="why-box-text">Earn points every time you recycle.</p></div>
+            <div class="why-box"><div class="why-box-icon">📹</div><p class="why-box-text">Quick video verification.</p></div>
+            <div class="why-box"><div class="why-box-icon">🏆</div><p class="why-box-text">Redeem real rewards.</p></div>
+            <div class="why-box"><div class="why-box-icon">🔥</div><p class="why-box-text">Build streaks.</p></div>
+            <div class="why-box"><div class="why-box-icon">📱</div><p class="why-box-text">Simple scan workflow.</p></div>
+            <div class="why-box"><div class="why-box-icon">🌱</div><p class="why-box-text">Make real impact.</p></div>
+          </div>
+        </section>
       </div>
 
-      <!-- SCAN PAGE -->
       <div class="page" id="page-scan">
         <div class="scan-content">
-          <div class="camera-preview">
-            <video id="video" playsinline muted autoplay></video>
-          </div>
-
+          <div class="camera-preview"><video id="video" playsinline muted autoplay></video></div>
           <div class="status-text" id="status">Ready to scan</div>
-
-          <button class="scan-btn" id="scanBtn" onclick="startScan()">Scan</button>
-
+          <button type="button" class="scan-btn" id="scanBtn" onclick="startScan()">Scan</button>
           <div class="scan-steps">
-            <div class="step-item">
-              <div class="step-dot"></div>
-              <div class="step-text"><strong>Scan product barcode</strong> — Find the product</div>
-            </div>
-            <div class="step-item">
-              <div class="step-dot"></div>
-              <div class="step-text"><strong>Scan bin barcode</strong> — Confirm the bin</div>
-            </div>
-            <div class="step-item">
-              <div class="step-dot"></div>
-              <div class="step-text"><strong>Record 2-sec video</strong> — Verify disposal & earn points</div>
-            </div>
+            <div class="step-item"><span class="step-dot"></span><span id="step1">1. Scan product barcode</span></div>
+            <div class="step-item"><span class="step-dot"></span><span id="step2">2. Scan trash can QR code</span></div>
+            <div class="step-item"><span class="step-dot"></span><span id="step3">3. Record 5-second video</span></div>
           </div>
         </div>
       </div>
 
-      <!-- REDEEM PAGE -->
       <div class="page" id="page-redeem">
         <div class="redeem-content">
+          <h2 class="home-title">Redeem</h2>
+          <p class="home-subtitle">Your points and rewards.</p>
           <div class="points-box">
             <div class="points-number" id="pointsDisplay">0</div>
-            <div class="points-label">points earned</div>
+            <div class="points-label">points</div>
           </div>
-
-          <div class="progress-box">
-            <div class="progress-header">
-              <span>Progress to next reward</span>
-              <span id="progressText">0 / 100</span>
-            </div>
-            <div class="progress-bar">
-              <div class="progress-fill" id="progressFill"></div>
-            </div>
-            <div class="progress-text" id="progressLabel">100 points to $1 credit</div>
-          </div>
+          <button type="button" class="nav-item" onclick="switchTab('home')" style="width:100%;">Back to Home</button>
         </div>
       </div>
 
-      <!-- ADMIN PAGE -->
-      <div class="page" id="page-admin">
-        <div class="scan-content">
-          <h2 class="home-title">Admin: Trash Cans</h2>
-          
-          <div style="background: #f9f9f9; padding: 24px; border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 32px;">
-            <h3 style="margin-bottom: 16px;">Create New Trash Can</h3>
-            <input type="text" id="adminCanId" placeholder="Can ID (e.g., TC001)" style="width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;" />
-            <input type="text" id="adminCanLabel" placeholder="Label (e.g., Alderman 1st Floor)" style="width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;" />
-            <input type="text" id="adminCanLocation" placeholder="Location (optional)" style="width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;" />
-            <button onclick="createTrashCan()" style="width: 100%; padding: 12px; background: #2E7D32; color: white; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;">Create Can</button>
+      <div class="page" id="page-profile">
+        <div class="redeem-content" style="max-width:700px;">
+          <div class="profile-cards-row">
+            <div class="profile-streak-card">
+              <div class="label">Current Streak</div>
+              <div class="number" id="profileStreakDays">0</div>
+              <div class="suffix">days in a row</div>
+            </div>
+            <div class="profile-points-card">
+              <div class="label">Points</div>
+              <div class="number" id="profilePointsDisplay">0</div>
+              <div class="suffix">pts</div>
+            </div>
           </div>
-
-          <h3 style="margin-bottom: 16px;">All Trash Cans</h3>
-          <div id="adminCansList" style="background: white; border: 1px solid #e0e0e0; border-radius: 10px; max-height: 400px; overflow-y: auto;"></div>
+          <div class="profile-intro">
+            <h2>Scan. Verify. Reward.</h2>
+            <p>Every item you recycle earns 20 points. 100 points = $1 dining credit.</p>
+          </div>
+          <div class="points-tracker-wrap">
+            <div class="points-tracker-title">Points Tracker</div>
+            <div class="points-tracker-number" id="trackerPointsNumber">0</div>
+            <div class="points-tracker-bar" id="pointsTrackerBar">
+              <div class="points-tracker-fill" id="pointsTrackerFill"></div>
+              <div class="points-tracker-cap" id="pointsTrackerCap"></div>
+            </div>
+          </div>
+          <button type="button" class="btn-scan-spruce" onclick="switchTab('scan')">Start Scanning</button>
+          <button type="button" class="nav-item" id="profileLoginBtn" onclick="toggleProfileOrLogin()" style="width:100%; margin-top:20px; background:transparent; border:2px solid #2E8B57; color:#2E8B57;">Log in</button>
         </div>
+      </div>
+
+      <div class="page" id="page-settings">
+        <div class="redeem-content">
+          <h2 class="home-title">Settings</h2>
+          <p class="home-subtitle">Account and app info.</p>
+          <button type="button" class="nav-item" onclick="toggleProfileOrLogin()" style="width:100%; margin-bottom:12px;">Account / Log in</button>
+          <p style="font-size:13px; color:#2D3A5C; margin-bottom:16px;">ClearCycle — Scan. Verify. Reward Sustainability.</p>
+          <button type="button" class="nav-item" onclick="logout()" style="width:100%; background:#1A2341;">Log out</button>
+        </div>
+      </div>
+
+      <div class="page" id="page-admin">
+        <div class="redeem-content" style="max-width:800px;">
+          <h2 class="home-title" style="color:#1A2341; font-size:28px; font-weight:800; margin-bottom:32px;">Admin: Trash Cans</h2>
+          <div id="adminAuthRequired" style="display:none; padding:20px; background:#fef3c7; border:2px solid #f59e0b; border-radius:12px; margin-bottom:24px; text-align:center;">
+            <p style="margin:0; color:#1A2341; font-weight:600;">Admin access required. <button type="button" onclick="showLoginModal()" style="background:none; border:none; color:#0D9488; text-decoration:underline; cursor:pointer; font-weight:700;">Log in</button> as admin.</p>
+          </div>
+          <div id="adminPanel" style="display:none;">
+            <div style="background:white; padding:28px; border-radius:16px; box-shadow:0 4px 16px rgba(0,0,0,0.1); margin-bottom:32px;">
+              <h3 style="color:#1A2341; font-size:20px; font-weight:700; margin-bottom:20px;">Create New Trash Can</h3>
+              <div style="display:flex; flex-direction:column; gap:16px;">
+                <input type="text" id="adminCanId" placeholder="Can ID (e.g., TC001)" style="padding:12px 16px; border:1px solid #d1d5db; border-radius:10px; font-size:14px; color:#1A2341;" />
+                <input type="text" id="adminCanLabel" placeholder="Label (e.g., Alderman 1st Floor)" style="padding:12px 16px; border:1px solid #d1d5db; border-radius:10px; font-size:14px; color:#1A2341;" />
+                <input type="text" id="adminCanLocation" placeholder="Location (optional)" style="padding:12px 16px; border:1px solid #d1d5db; border-radius:10px; font-size:14px; color:#1A2341;" />
+                <button type="button" onclick="createTrashCan()" style="padding:12px 24px; background:#2E8B57; color:white; border:none; border-radius:10px; font-weight:700; font-size:15px; cursor:pointer; transition:all 0.2s ease;">Create Can</button>
+              </div>
+            </div>
+            <div>
+              <h3 style="color:#1A2341; font-size:20px; font-weight:700; margin-bottom:20px;">All Trash Cans</h3>
+              <div id="adminTrashCansList" style="display:flex; flex-direction:column; gap:12px;">
+                <p style="color:#64748b; font-size:14px;">Loading trash cans...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer>
+    <button type="button" class="footer-btn" onclick="alert('Contact us at hello@clearcycle.app')">Contact Us</button>
+    <span class="footer-credits">Built for Hoya Hacks 2026 @ Georgetown University</span>
+  </footer>
+
+  <div class="modal" id="productConfirmModal">
+    <div class="product-modal-box">
+      <div class="product-modal-title" id="productModalTitle">Product</div>
+      <div class="product-modal-img-wrap">
+        <img class="product-modal-img" id="productModalImg" src="" alt="" style="display:none;" />
+      </div>
+      <div class="product-modal-brand" id="productModalBrand"></div>
+      <div class="product-modal-desc" id="productModalDesc"></div>
+      <div class="product-modal-btns">
+        <button type="button" class="product-modal-btn-yes" id="productModalYes" onclick="confirmProductYes()">Yes</button>
+        <button type="button" class="product-modal-btn-no" id="productModalNo" onclick="confirmProductNo()">No</button>
       </div>
     </div>
   </div>
 
-  <!-- FOOTER -->
-  <footer>
-    <button class="footer-btn" onclick="alert('Contact us at hello@clearcycle.app')">Contact Us</button>
-  </footer>
-
-  <!-- MODAL -->
-  <div class="modal" id="modal">
-    <div class="modal-box">
-      <div class="modal-title" id="modalTitle">Confirm</div>
-      <img id="modalImage" class="modal-image" style="display: none;" />
-      <div class="modal-text" id="modalText">Is this correct?</div>
-      <div id="modalMeta" class="modal-meta" style="display: none;"></div>
-      
-      <div id="verificationButtons" class="modal-buttons">
-        <button class="modal-btn modal-confirm" onclick="confirmAction()">Yes</button>
-        <button class="modal-btn modal-cancel" onclick="cancelAction()">No</button>
+  <div class="modal" id="trashCanConfirmModal">
+    <div class="product-modal-box">
+      <div class="product-modal-title" id="trashCanModalTitle" style="color:#2F6A2F; font-size:20px; font-weight:800; margin-bottom:16px;">Is this the correct trash can?</div>
+      <div class="product-modal-img-wrap">
+        <img class="product-modal-img" id="trashCanModalImg" src="" alt="" style="display:none; max-width:200px; max-height:200px; border-radius:12px;" />
       </div>
-      
-      <div id="manualFormContainer" style="display: none;">
-        <div class="modal-form">
-          <input class="modal-input" id="manualName" placeholder="Product name (required)" />
-          <input class="modal-input" id="manualBrand" placeholder="Brand (optional)" />
-          <input class="modal-input" id="manualCategory" placeholder="Category (optional)" />
-        </div>
+      <div class="product-modal-brand" id="trashCanModalId" style="font-size:18px; font-weight:700; color:#1A2F50; margin-bottom:12px;"></div>
+      <div class="product-modal-desc" id="trashCanModalDesc" style="background:#f5f5f5; padding:12px 16px; border-radius:10px; margin-bottom:20px; text-align:left;">
+        <div style="font-size:14px; color:#1A2F50; margin-bottom:4px; font-weight:600;">Location:</div>
+        <div id="trashCanModalLocation" style="font-size:14px; color:#1A2341; font-weight:600;"></div>
+      </div>
+      <div class="product-modal-btns">
+        <button type="button" class="product-modal-btn-yes" onclick="confirmTrashCanYes()" style="background:#2F6A2F; color:white;">Yes</button>
+        <button type="button" class="product-modal-btn-no" onclick="confirmTrashCanNo()" style="background:#E0E0E5; color:#1A2F50;">No</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="videoRecordModal">
+    <div class="product-modal-box" style="max-width:500px;">
+      <div class="product-modal-title">Record Video</div>
+      <div style="margin-bottom:16px;">
+        <video id="recordVideo" playsinline autoplay muted style="width:100%; max-width:400px; border-radius:12px; background:#000;"></video>
+      </div>
+      <div style="margin-bottom:16px; font-size:14px; color:#1A2341;">
+        <div id="videoTimer" style="font-size:18px; font-weight:700; color:#2E8B57; text-align:center;">0s</div>
+        <div style="text-align:center; margin-top:8px;">Record yourself throwing the item into the bin (5 seconds)</div>
+      </div>
+      <div class="product-modal-btns">
+        <button type="button" class="product-modal-btn-yes" id="startRecordBtn" onclick="startVideoRecording()">Start Recording</button>
+        <button type="button" class="product-modal-btn-no" id="stopRecordBtn" onclick="stopVideoRecording()" style="display:none;">Stop & Submit</button>
+        <button type="button" class="product-modal-btn-no" onclick="cancelVideoRecording()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="verificationResultModal">
+    <div class="product-modal-box">
+      <div class="product-modal-title" id="verificationResultTitle" style="color:#2F6A2F;">Verification Result</div>
+      <div id="verificationResultMessage" style="margin-bottom:20px; font-size:15px; color:#1A2341; text-align:center; line-height:1.6;"></div>
+      <div id="verificationResultDetails" style="background:#f5f5f5; padding:14px 16px; border-radius:10px; margin-bottom:20px; font-size:13px; color:#1A2341; text-align:left;"></div>
+      <div class="product-modal-btns">
+        <button type="button" class="product-modal-btn-yes" onclick="closeVerificationModal()" style="background:#2F6A2F;">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="loginModal">
+    <div class="modal-box">
+      <div class="modal-title">Log in to ClearCycle</div>
+      <div style="display:flex; gap:10px; margin-bottom:20px;">
+        <button type="button" class="modal-btn modal-confirm" id="loginTabBtn" onclick="switchLoginTab('login')" style="flex:1;">Login</button>
+        <button type="button" class="modal-btn modal-cancel" id="registerTabBtn" onclick="switchLoginTab('register')" style="flex:1;">Register</button>
+      </div>
+      <div id="loginForm" style="display:block;">
+        <input type="email" class="modal-input" id="loginEmail" placeholder="Email" />
+        <input type="password" class="modal-input" id="loginPassword" placeholder="Password" />
+        <div id="loginError" style="color:#dc2626; font-size:12px; margin-bottom:10px; display:none;"></div>
         <div class="modal-buttons">
-          <button class="modal-btn modal-confirm" onclick="saveManualProduct()">Save</button>
-          <button class="modal-btn modal-cancel" onclick="cancelAction()">Cancel</button>
+          <button type="button" class="modal-btn modal-confirm" onclick="handleLogin()">Sign In</button>
+          <button type="button" class="modal-btn modal-cancel" onclick="closeLoginModal()">Cancel</button>
+        </div>
+      </div>
+      <div id="registerForm" style="display:none;">
+        <input type="text" class="modal-input" id="registerName" placeholder="Full name" />
+        <input type="email" class="modal-input" id="registerEmail" placeholder="Email" />
+        <input type="password" class="modal-input" id="registerPassword" placeholder="Password" />
+        <div id="registerError" style="color:#dc2626; font-size:12px; margin-bottom:10px; display:none;"></div>
+        <div class="modal-buttons">
+          <button type="button" class="modal-btn modal-confirm" onclick="handleRegister()">Create Account</button>
+          <button type="button" class="modal-btn modal-cancel" onclick="closeLoginModal()">Cancel</button>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    const API = 'http://localhost:4000';
-    const EMAIL = 'demo@clear.cycle';
-    const { BrowserMultiFormatReader } = ZXing;
-
-    let state = {
-      step: 'idle',
-      sessionId: null,
-      productBarcode: null,
-      binBarcode: null,
-      stream: null,
-      busy: false,
-      points: 0,
-      pendingAction: null,
-      lastProduct: null,
-      isScanning: false,
-      currentFormat: null, // 'barcode' or 'qr'
+    const API = (/^(http:\/\/localhost|http:\/\/127\.0\.0\.1):3000$/.test(window.location.origin)) ? 'http://localhost:4000' : '';
+    const authState = { user: null, token: null };
+    const state = { 
+      points: 0, 
+      streak: 0, 
+      isScanning: false, 
+      pendingBarcode: null,
+      recycleSession: null,
+      recycleStep: null, // 'product', 'bin', 'video'
+      isRecording: false,
+      mediaRecorder: null,
+      recordedChunks: []
     };
-
-    const video = document.getElementById('video');
-    const status = document.getElementById('status');
-    const scanBtn = document.getElementById('scanBtn');
-    const modal = document.getElementById('modal');
-    let reader = new BrowserMultiFormatReader();
-
-    function loadPoints() {
-      state.points = parseInt(localStorage.getItem('cc_points') || '0');
-      updateDisplay();
-    }
-
-    function updateDisplay() {
-      document.getElementById('pointsDisplay').textContent = state.points;
-      document.getElementById('pointsBadge').textContent = state.points + ' pts';
-      const ptsInCurrent = state.points % 100;
-      const ptsToNext = 100 - ptsInCurrent;
-      document.getElementById('progressText').textContent = `${ptsInCurrent} / 100`;
-      document.getElementById('progressFill').style.width = `${(ptsInCurrent / 100) * 100}%`;
-      document.getElementById('progressLabel').textContent = `${ptsToNext} points to $1 credit`;
-      localStorage.setItem('cc_points', state.points);
-    }
 
     function switchTab(page) {
       document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-      document.getElementById(`page-${page}`).classList.add('active');
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      event.target.classList.add('active');
+      const el = document.getElementById('page-' + page);
+      if (el) el.classList.add('active');
+      document.querySelectorAll('.simple-nav-link').forEach(n => n.classList.remove('active'));
+      document.querySelectorAll('.nav-item, .nav-dropdown').forEach(n => n.classList.remove('active'));
+      const navMap = { home: 'navHome', scan: 'navScan', redeem: 'navRedeem', admin: 'navAdmin', profile: 'navProfile', settings: 'navSettings' };
+      const navId = navMap[page];
+      if (navId) {
+        const n = document.getElementById(navId);
+        if (n) n.classList.add('active');
+      }
+      if (page === 'admin') {
+        updateAdminUI();
+      } else if (page === 'scan') {
+        // Reset scan state when entering scan page
+        state.recycleSession = null;
+        state.recycleStep = null;
+        state.pendingBarcode = null;
+        state.isScanning = false;
+        const status = document.getElementById('status');
+        if (status) status.textContent = 'Ready to scan';
+        updateScanSteps();
+      }
     }
 
-    async function stopScanning() {
-      console.log('[CAMERA] Stopping scanner and stream...');
-      state.isScanning = false;
-      
-      try { reader.reset(); } catch (e) {
-        console.log('[CAMERA] Reader reset error:', e);
-      }
-      
-      if (state.stream) {
-        console.log('[CAMERA] Stopping all video tracks...');
-        state.stream.getTracks().forEach(t => {
-          t.stop();
-          console.log('[CAMERA] Track stopped');
-        });
-        state.stream = null;
-      }
-      
-      video.srcObject = null;
-      console.log('[CAMERA] Camera fully stopped');
+    function closeAllDropdowns() {
+      document.querySelectorAll('.nav-dropdown.open').forEach(d => d.classList.remove('open'));
     }
+    function closeLoginDropdown() {
+      document.getElementById('loginDropdown').classList.remove('open');
+    }
+    function toggleLoginDropdown() {
+      closeAllDropdowns();
+      const d = document.getElementById('loginDropdown');
+      d.classList.toggle('open');
+    }
+    document.querySelectorAll('.nav-trigger').forEach(btn => {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        closeLoginDropdown();
+        const dd = this.closest('.nav-dropdown');
+        const open = dd.classList.contains('open');
+        closeAllDropdowns();
+        if (!open) dd.classList.add('open');
+      });
+    });
+    document.addEventListener('click', function(e) {
+      if (e.target.closest('.nav-dropdown') || e.target.closest('.login-wrap')) return;
+      closeAllDropdowns();
+      closeLoginDropdown();
+    });
 
-    async function startCamera(format = 'barcode') {
-      console.log(`[CAMERA] Starting camera for ${format}...`);
-      
-      // If switching format, reset the reader even if stream is active
-      if (state.currentFormat && state.currentFormat !== format) {
-        console.log(`[CAMERA] Format change detected: ${state.currentFormat} → ${format}, resetting reader...`);
-        try { reader.reset(); } catch {}
+    function toggleProfileOrLogin() {
+      closeLoginDropdown();
+      const modal = document.getElementById('loginModal');
+      if (modal.classList.contains('show')) { modal.classList.remove('show'); return; }
+      switchLoginTab('login');
+      modal.classList.add('show');
+    }
+    function showLoginModal() { switchLoginTab('login'); document.getElementById('loginModal').classList.add('show'); }
+    function closeLoginModal() {
+      document.getElementById('loginModal').classList.remove('show');
+      document.getElementById('loginEmail').value = '';
+      document.getElementById('loginPassword').value = '';
+      document.getElementById('registerName').value = '';
+      document.getElementById('registerEmail').value = '';
+      document.getElementById('registerPassword').value = '';
+      document.getElementById('loginError').style.display = 'none';
+      document.getElementById('registerError').style.display = 'none';
+    }
+    function switchLoginTab(tab) {
+      const loginForm = document.getElementById('loginForm');
+      const registerForm = document.getElementById('registerForm');
+      const loginBtn = document.getElementById('loginTabBtn');
+      const regBtn = document.getElementById('registerTabBtn');
+      if (tab === 'login') {
+        loginForm.style.display = 'block';
+        registerForm.style.display = 'none';
+        loginBtn.style.background = '#0D9488';
+        loginBtn.style.color = 'white';
+        regBtn.style.background = '#e5e7eb';
+        regBtn.style.color = '#1A2341';
+      } else {
+        loginForm.style.display = 'none';
+        registerForm.style.display = 'block';
+        regBtn.style.background = '#0D9488';
+        regBtn.style.color = 'white';
+        loginBtn.style.background = '#e5e7eb';
+        loginBtn.style.color = '#1A2341';
       }
-      
-      state.currentFormat = format;
-      
-      // Stream already active and same format? Just ensure video is playing
-      if (state.stream && state.stream.getTracks().length > 0) {
-        console.log('[CAMERA] Stream already active, ensuring video plays...');
-        if (video.paused) {
-          video.play().catch(e => console.log('[CAMERA] Video play error:', e));
-        }
-        return;
-      }
-      
+    }
+    async function handleLogin() {
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value.trim();
+      const err = document.getElementById('loginError');
+      if (!email || !password) { err.textContent = 'Email and password required'; err.style.display = 'block'; return; }
       try {
-        console.log('[CAMERA] Requesting getUserMedia...');
-        state.stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-          audio: false,
-        });
-        
-        console.log('[CAMERA] Stream acquired, attaching to video element...');
-        video.srcObject = state.stream;
-        
-        // Ensure video plays
-        video.play().catch(e => console.log('[CAMERA] Video play error:', e));
-        
-        console.log('[CAMERA] Camera ready for', format);
-      } catch (e) {
-        console.error('[CAMERA] Camera error:', e.message);
-        showError('Camera error: ' + e.message);
-        throw e;
-      }
-    }
-
-    async function stopCamera() {
-      await stopScanning();
-    }
-
-    function showError(msg) {
-      status.classList.add('error');
-      status.textContent = msg;
-    }
-
-    function clearError() {
-      status.classList.remove('error');
-    }
-
-    async function lookupProduct(barcode) {
-      try {
-        console.log('[DEBUG] Looking up barcode:', barcode);
-        console.log('[DEBUG] API endpoint:', `${API}/api/product?barcode=${encodeURIComponent(barcode)}`);
-        const res = await fetch(`${API}/api/product?barcode=${encodeURIComponent(barcode)}`);
-        console.log('[DEBUG] Response status:', res.status);
-        
-        if (!res.ok) {
-          console.error('[DEBUG] Response not OK:', res.statusText);
-          return { found: false, barcode, needsVerification: true };
-        }
-        
+        const res = await fetch(API + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
         const data = await res.json();
-        console.log('[DEBUG] Response data:', JSON.stringify(data));
-        
-        if (data.found) {
-          console.log('[DEBUG] Product found:', data.name);
-          return {
-            found: true,
-            barcode: data.barcode,
-            name: data.name,
-            brand: data.brand || '',
-            category: data.category || '',
-            image: data.image || null,
-            source: data.source,
-            confidence: data.confidence,
-            needsVerification: data.needsVerification,
-          };
+        if (data.token) {
+          authState.token = data.token;
+          authState.user = data.user || { email, name: 'User', role: 'student' };
+          localStorage.setItem('cc_token', data.token);
+          localStorage.setItem('cc_user', JSON.stringify(authState.user));
+          closeLoginModal();
+          updateAuthUI();
+          switchTab('profile');
+          if (document.getElementById('page-admin').classList.contains('active')) updateAdminUI();
+          return;
         }
-        console.log('[DEBUG] Product NOT found in response');
-        return { found: false, barcode, needsVerification: true };
+        err.textContent = data.error || 'Login failed';
+        err.style.display = 'block';
       } catch (e) {
-        console.error('[DEBUG] Lookup error:', e.message);
-        status.textContent = 'Lookup error: ' + e.message;
-        return { found: false, barcode, needsVerification: true };
+        err.textContent = 'Network error. Is the backend running?';
+        err.style.display = 'block';
       }
     }
-
-    async function scanBarcode(format = 'barcode') {
-      return new Promise((resolve, reject) => {
-        let found = false;
-        let decodeControls = null;
-        
-        console.log(`[SCANNER] Starting decode for format: ${format}`);
-        
-        // Validate stream
-        if (!state.stream) {
-          console.error('[SCANNER] No stream available!');
-          reject(new Error('Camera stream not initialized'));
-          return;
-        }
-        
-        // Validate video element
-        if (!video.srcObject) {
-          console.error('[SCANNER] Video element has no source!');
-          reject(new Error('Video element not connected to stream'));
-          return;
-        }
-        
-        // Ensure video is playing
-        if (video.paused) {
-          console.log('[SCANNER] Video is paused, starting playback...');
-          video.play().catch(e => console.log('[SCANNER] Video play error:', e));
-        }
-        
-        state.isScanning = true;
-        
-        const timer = setTimeout(() => {
-          found = true;
-          state.isScanning = false;
-          if (decodeControls) {
-            try { decodeControls.stop(); } catch {}
-          }
-          console.log('[SCANNER] Scan timeout');
-          reject(new Error('Scan timeout (20s)'));
-        }, 20000);
-
-        try {
-          console.log('[SCANNER] Starting decode stream...');
-          decodeControls = reader.decodeFromStream(state.stream, video, (result) => {
-            if (result && !found) {
-              const text = result.getText();
-              if (text && text.length > 0) {
-                found = true;
-                state.isScanning = false;
-                clearTimeout(timer);
-                if (decodeControls) {
-                  try { decodeControls.stop(); } catch {}
-                }
-                console.log(`[SCANNER] Detected: ${text}`);
-                resolve(text);
-              }
-            }
-          });
-        } catch (err) {
-          clearTimeout(timer);
-          state.isScanning = false;
-          console.error('[SCANNER] Decode error:', err.message);
-          reject(new Error('Scan failed: ' + err.message));
-        }
-      });
-    }
-
-    async function recordVideo() {
-      const rec = new MediaRecorder(state.stream);
-      const chunks = [];
-      rec.ondataavailable = e => chunks.push(e.data);
-      rec.start();
-      await new Promise(r => setTimeout(r, 2000));
-      rec.stop();
-      return new Promise(r => {
-        rec.onstop = () => r(new Blob(chunks));
-      });
-    }
-
-    async function startScan() {
-      if (state.busy) return;
-      if (state.isScanning) {
-        console.log('[SCAN] Already scanning, ignoring click');
-        return;
-      }
-      
-      state.busy = true;
-      scanBtn.disabled = true;
-
+    async function handleRegister() {
+      const name = document.getElementById('registerName').value.trim();
+      const email = document.getElementById('registerEmail').value.trim();
+      const password = document.getElementById('registerPassword').value.trim();
+      const err = document.getElementById('registerError');
+      if (!name || !email || !password) { err.textContent = 'Name, email, and password required'; err.style.display = 'block'; return; }
       try {
-        if (state.step === 'idle') {
-          status.textContent = 'Requesting camera...';
-          clearError();
-          console.log('[SCAN] Starting camera for product scan');
-          await startCamera('barcode');
-          const res = await fetch(`${API}/api/recycle/session/start`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: EMAIL }),
-          }).then(r => r.json());
-          state.sessionId = res.sessionId;
-          state.step = 'product';
-          status.textContent = 'Scanning product barcode...';
-          state.busy = false;
-          scanBtn.disabled = false;
+        const res = await fetch(API + '/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password, role: 'student' }) });
+        const data = await res.json();
+        if (data.token) {
+          authState.token = data.token;
+          authState.user = data.user || { email, name, role: 'student' };
+          localStorage.setItem('cc_token', data.token);
+          localStorage.setItem('cc_user', JSON.stringify(authState.user));
+          closeLoginModal();
+          updateAuthUI();
+          switchTab('profile');
           return;
         }
-
-        if (state.step === 'product') {
-          status.textContent = 'Scanning...';
-          let code;
-          try {
-            code = await scanBarcode('barcode');
-          } catch (e) {
-            showError(e.message);
-            state.busy = false;
-            scanBtn.disabled = false;
-            return;
-          }
-          state.productBarcode = code;
-          
-          status.textContent = 'Looking up product...';
-          const product = await lookupProduct(code);
-          state.lastProduct = product;
-          
-          if (product.found && !product.needsVerification) {
-            const title = product.name || 'Product';
-            const details = (product.brand ? product.brand + ' • ' : '') + (product.category || 'Beverage');
-            showVerificationModal(title, details, 'confirmProduct', product);
-          } else if (product.found && product.needsVerification) {
-            const title = product.name || 'Product';
-            const details = product.brand || product.category || 'Product';
-            showVerificationModal(title, details, 'confirmProduct', product);
-          } else {
-            showManualFormModal('Add Product Manually', code, 'confirmProduct');
-          }
-          return;
-        }
-
-        if (state.step === 'bin') {
-          status.textContent = 'Scanning bin barcode...';
-          console.log('[SCAN] Switching to bin scan mode - doing hard camera reset');
-          
-          // HARD RESET: Stop all tracks, wait, restart completely
-          console.log('[SCAN] Stopping all video tracks...');
-          try { reader.reset(); } catch {}
-          if (state.stream) {
-            state.stream.getTracks().forEach(t => t.stop());
-            state.stream = null;
-          }
-          video.srcObject = null;
-          
-          console.log('[SCAN] Waiting 200ms before restart...');
-          await new Promise(r => setTimeout(r, 200));
-          
-          console.log('[SCAN] Restarting camera...');
-          await startCamera('qr');
-          
-          console.log('[SCAN] Camera restarted, ready to scan');
-          
-          let code;
-          try {
-            code = await scanBarcode('qr');
-          } catch (e) {
-            console.error('[SCAN] Bin scan error:', e);
-            showError(e.message);
-            state.busy = false;
-            scanBtn.disabled = false;
-            return;
-          }
-          state.binBarcode = code;
-          status.textContent = 'Bin confirmed!';
-          
-          // Extract canId from the scanned code (might be a full URL or just an ID)
-          let canId = code;
-          
-          // If it's a URL like "http://localhost:3000/can/TC001", extract TC001
-          const urlMatch = code.match(/\/can\/([^/?]+)/);
-          if (urlMatch) {
-            canId = decodeURIComponent(urlMatch[1]);
-            console.log('[BIN] Extracted canId from URL:', canId);
-          }
-          
-          // Hardcoded data for known trash cans (fallback)
-          const hardcodedCans = {
-            'TC001': {
-              found: true,
-              label: 'Outside Trash Can',
-              location: 'Smayans house',
-              image: '/uploads/outside-trash-can.png'
-            }
-          };
-          
-          // Start with hardcoded data if available
-          let binDetails = hardcodedCans[canId] || {
-            found: true,
-            label: 'Recycling Bin',
-            location: 'Unknown Location',
-            image: null
-          };
-          
-          console.log('[BIN] Scanned code:', code);
-          console.log('[BIN] Extracted canId:', canId);
-          console.log('[BIN] Initial binDetails:', binDetails);
-          
-          try {
-            const binRes = await fetch(`${API}/api/trash-cans/${encodeURIComponent(canId)}`);
-            console.log('[BIN] API response status:', binRes.status);
-            if (binRes.ok) {
-              const binData = await binRes.json();
-              console.log('[BIN] API data:', binData);
-              if (binData.can) {
-                binDetails = {
-                  found: true,
-                  label: binData.can.label || binDetails.label,
-                  location: binData.can.location || binDetails.location,
-                  image: binData.can.image ? `${API}${binData.can.image}` : binDetails.image
-                };
-                console.log('[BIN] Updated binDetails from API:', binDetails);
-              }
-            }
-          } catch (e) {
-            console.error('[BIN] Error fetching bin details:', e);
-          }
-          
-          console.log('[BIN] Final binDetails:', binDetails);
-          showVerificationModal(binDetails.label, `${binDetails.location}`, 'confirmBin', binDetails);
-          return;
-        }
-
-        if (state.step === 'video') {
-          console.log('[VIDEO] Starting recording...');
-          status.textContent = 'Recording (2 seconds)...';
-          scanBtn.textContent = 'Recording...';
-          scanBtn.disabled = true;
-          
-          let blob;
-          try {
-            blob = await recordVideo();
-          } catch (e) {
-            console.error('[VIDEO] Recording failed:', e);
-            showError('Recording failed: ' + e.message);
-            state.busy = false;
-            scanBtn.disabled = false;
-            scanBtn.textContent = 'Record';
-            return;
-          }
-          
-          console.log('[VIDEO] Recording complete, uploading...');
-          status.textContent = 'Uploading...';
-          const fd = new FormData();
-          fd.append('video', blob, `${Date.now()}.webm`);
-          fd.append('frames', '[]');
-          const res = await fetch(`${API}/api/recycle/session/${state.sessionId}/video`, {
-            method: 'POST',
-            body: fd,
-          }).then(r => r.json());
-          
-          console.log('[VIDEO] Upload complete:', res);
-          
-          if (res.verified) {
-            state.points += 20;
-            updateDisplay();
-            status.textContent = '✅ Verified! +20 points';
-          } else {
-            status.textContent = '❌ Not verified - try again';
-          }
-          await new Promise(r => setTimeout(r, 2000));
-          await stopCamera();
-          state.step = 'idle';
-          state.sessionId = null;
-          status.textContent = 'Ready to scan';
-          scanBtn.textContent = 'Scan';
-          state.busy = false;
-          scanBtn.disabled = false;
-          return;
-        }
+        err.textContent = data.error || 'Registration failed';
+        err.style.display = 'block';
       } catch (e) {
-        showError(e.message);
-        state.busy = false;
-        scanBtn.disabled = false;
+        err.textContent = 'Network error. Is the backend running?';
+        err.style.display = 'block';
       }
     }
-
-    function showVerificationModal(title, text, action, product) {
-      document.getElementById('modalTitle').textContent = title;
-      document.getElementById('modalText').textContent = text;
-      state.pendingAction = action;
-      
-      const img = document.getElementById('modalImage');
-      if (product && product.image) {
-        img.src = product.image;
-        img.style.display = 'block';
+    function logout() {
+      authState.token = null;
+      authState.user = null;
+      localStorage.removeItem('cc_token');
+      localStorage.removeItem('cc_user');
+      updateAuthUI();
+      closeLoginDropdown();
+      closeAllDropdowns();
+    }
+    function updateAuthUI() {
+      const token = localStorage.getItem('cc_token');
+      const userJson = localStorage.getItem('cc_user');
+      if (token && userJson) {
+        try {
+          authState.token = token;
+          authState.user = JSON.parse(userJson);
+        } catch (_) {}
+      }
+      const btnLogin = document.getElementById('btnLogin');
+      const btnSignOut = document.getElementById('btnSignOut');
+      const loginOpt = document.getElementById('loginDropdownLogin');
+      if (authState.user) {
+        if (btnLogin) { btnLogin.title = authState.user.email || 'Account'; btnLogin.textContent = '👤 Account'; }
+        if (btnSignOut) { btnSignOut.style.display = 'block'; btnSignOut.textContent = 'Sign Out'; }
+        if (loginOpt) loginOpt.style.display = 'none';
       } else {
-        img.style.display = 'none';
+        if (btnLogin) { btnLogin.title = 'Log in'; btnLogin.textContent = '👤 Log in'; }
+        if (btnSignOut) btnSignOut.style.display = 'none';
+        if (loginOpt) loginOpt.style.display = 'block';
       }
-      
-      const meta = document.getElementById('modalMeta');
-      let metaText = '';
-      
-      if (product && product.brand) metaText += `Brand: ${product.brand}<br>`;
-      if (product && product.category) metaText += `Category: ${product.category}`;
-      if (product && product.location && action === 'confirmBin') metaText += (metaText ? '<br>' : '') + `Location: ${product.location}`;
-      
-      if (metaText) {
-        meta.innerHTML = metaText;
-        meta.style.display = 'block';
+      const adminNav = document.getElementById('navAdmin');
+      if (adminNav) adminNav.style.display = (authState.user && authState.user.role === 'admin') ? 'block' : 'none';
+      // Update active nav on page load
+      const currentPage = document.querySelector('.page.active');
+      if (currentPage) {
+        const pageId = currentPage.id.replace('page-', '');
+        switchTab(pageId);
+      }
+      const headerPts = document.getElementById('headerPts');
+      if (headerPts) headerPts.style.display = authState.user ? 'inline-block' : 'none';
+      const profileLoginBtn = document.getElementById('profileLoginBtn');
+      if (profileLoginBtn) {
+        if (authState.user) {
+          profileLoginBtn.textContent = 'Account';
+          profileLoginBtn.style.display = 'none';
+        } else {
+          profileLoginBtn.textContent = 'Log in';
+          profileLoginBtn.style.display = 'block';
+        }
+      }
+    }
+    function updateAdminUI() {
+      const panel = document.getElementById('adminPanel');
+      const req = document.getElementById('adminAuthRequired');
+      if (authState.user && authState.user.role === 'admin') {
+        if (panel) panel.style.display = 'block';
+        if (req) req.style.display = 'none';
+        loadTrashCans();
       } else {
-        meta.style.display = 'none';
+        if (panel) panel.style.display = 'none';
+        if (req) req.style.display = 'block';
       }
-      
-      // Ensure camera stays live even when modal is open
-      if (state.stream && video.srcObject !== state.stream) {
-        video.srcObject = state.stream;
-      }
-      if (video.paused) {
-        video.play().catch(e => console.log('[DEBUG] Video play error:', e));
-      }
-      
-      document.getElementById('verificationButtons').style.display = 'flex';
-      document.getElementById('manualFormContainer').style.display = 'none';
-      modal.classList.add('show');
     }
-
-    function showManualFormModal(title, barcode, action) {
-      document.getElementById('modalTitle').textContent = title;
-      document.getElementById('modalImage').style.display = 'none';
-      document.getElementById('modalText').textContent = 'Help us add this product:';
-      document.getElementById('modalMeta').style.display = 'none';
-      
-      state.pendingAction = action;
-      
-      document.getElementById('manualName').value = '';
-      document.getElementById('manualBrand').value = '';
-      document.getElementById('manualCategory').value = '';
-      
-      document.getElementById('verificationButtons').style.display = 'none';
-      document.getElementById('manualFormContainer').style.display = 'block';
-      modal.classList.add('show');
-    }
-
-    async function saveManualProduct() {
-      const name = document.getElementById('manualName').value.trim();
-      if (!name) {
-        showError('Product name is required');
-        return;
-      }
-      
-      const brand = document.getElementById('manualBrand').value.trim() || null;
-      const category = document.getElementById('manualCategory').value.trim() || null;
-      
+    async function loadTrashCans() {
+      const listEl = document.getElementById('adminTrashCansList');
+      if (!listEl) return;
       try {
-        status.textContent = 'Saving product...';
-        const res = await fetch(`${API}/api/product`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            barcode: state.productBarcode,
-            name,
-            brand,
-            category,
-            lastVerified: true
-          })
-        }).then(r => r.json());
-        
-        if (res.saved) {
-          modal.classList.remove('show');
-          confirmAction();
-        }
-      } catch (e) {
-        showError('Error saving: ' + e.message);
-      }
-    }
-
-    async function confirmAction() {
-      modal.classList.remove('show');
-      
-      if (state.pendingAction === 'confirmProduct') {
-        status.textContent = 'Confirming product...';
-        try {
-          await fetch(`${API}/api/recycle/session/${state.sessionId}/product`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ barcode: state.productBarcode }),
-          }).then(r => r.json());
-        } catch (e) {
-          showError('Error confirming product: ' + e.message);
-          state.busy = false;
-          scanBtn.disabled = false;
+        const res = await fetch(API + '/api/trash-cans');
+        const data = await res.json();
+        const cans = data.cans || data || [];
+        if (cans.length === 0) {
+          listEl.innerHTML = '<p style="color:#64748b; font-size:14px;">No trash cans yet. Create one above!</p>';
           return;
         }
-        state.step = 'bin';
-        status.textContent = 'Ready to scan bin';
-        state.busy = false;
-        scanBtn.disabled = false;
-      } else if (state.pendingAction === 'confirmBin') {
-        status.textContent = 'Confirming bin...';
-        try {
-          await fetch(`${API}/api/recycle/session/${state.sessionId}/bin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ barcode: state.binBarcode }),
-          }).then(r => r.json());
-        } catch (e) {
-          showError('Error confirming bin: ' + e.message);
-          state.busy = false;
-          scanBtn.disabled = false;
-          return;
-        }
-        state.step = 'video';
-        status.textContent = 'Ready to record';
-        scanBtn.textContent = 'Record';
-        state.busy = false;
-        scanBtn.disabled = false;
+        listEl.innerHTML = cans.map(can => `
+          <div style="background:white; padding:20px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.08); display:flex; align-items:center; justify-content:space-between; gap:16px;">
+            <div style="flex:1;">
+              <div style="font-size:18px; font-weight:700; color:#1A2341; margin-bottom:6px;">${can.id || 'Unknown'}</div>
+              <div style="font-size:14px; color:#64748b; line-height:1.4;">
+                ${can.label || ''}${can.location ? ' - ' + can.location : ''}
+              </div>
+            </div>
+            <button type="button" onclick="downloadQR('${can.id}')" style="padding:10px 20px; background:#2E8B57; color:white; border:none; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer; transition:all 0.2s ease; white-space:nowrap;">Download QR</button>
+          </div>
+        `).join('');
+      } catch (err) {
+        listEl.innerHTML = '<p style="color:#dc2626; font-size:14px;">Error loading trash cans: ' + (err.message || 'Network error') + '</p>';
       }
     }
-
-    function cancelAction() {
-      modal.classList.remove('show');
-      
-      if (state.pendingAction === 'confirmProduct') {
-        showManualFormModal('Add Product Manually', state.productBarcode, 'confirmProduct');
-        return;
-      }
-      
-      status.textContent = 'Ready to scan';
-      state.busy = false;
-      scanBtn.disabled = false;
-    }
-
-    // Admin functions
     async function createTrashCan() {
       const id = document.getElementById('adminCanId').value.trim();
       const label = document.getElementById('adminCanLabel').value.trim();
       const location = document.getElementById('adminCanLocation').value.trim();
-
       if (!id) {
         alert('Can ID is required');
         return;
       }
-
+      if (!authState.token) {
+        alert('Please log in as admin');
+        showLoginModal();
+        return;
+      }
       try {
-        const res = await fetch(`${API}/api/trash-cans`, {
+        const res = await fetch(API + '/api/trash-cans', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id,
-            label: label || null,
-            location: location || null
-          })
-        }).then(r => r.json());
-
-        if (res.saved) {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + authState.token
+          },
+          body: JSON.stringify({ id, label, location })
+        });
+        const data = await res.json();
+        if (res.ok && data.saved) {
           document.getElementById('adminCanId').value = '';
           document.getElementById('adminCanLabel').value = '';
           document.getElementById('adminCanLocation').value = '';
           loadTrashCans();
-          alert('Trash can created!');
+          alert('Trash can created successfully!');
         } else {
-          alert('Error: ' + (res.error || 'Unknown error'));
+          alert(data.error || 'Failed to create trash can');
         }
-      } catch (e) {
-        alert('Error: ' + e.message);
+      } catch (err) {
+        alert('Error creating trash can: ' + (err.message || 'Network error'));
       }
     }
-
-    async function loadTrashCans() {
-      try {
-        const res = await fetch(`${API}/api/trash-cans`).then(r => r.json());
-        const container = document.getElementById('adminCansList');
-
-        if (!res.cans || res.cans.length === 0) {
-          container.innerHTML = '<p style="padding: 20px; text-align: center; color: #666;">No trash cans yet</p>';
-          return;
-        }
-
-        container.innerHTML = res.cans.map(can => `
-          <div style="padding: 16px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <div style="font-weight: 700; color: #333;">${can.id}</div>
-              <div style="font-size: 12px; color: #666;">${can.label || 'No label'} • ${can.location || 'No location'}</div>
-            </div>
-            <button onclick="downloadQR('${can.id}')" style="padding: 8px 16px; background: #2E7D32; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 12px;">Download QR</button>
-          </div>
-        `).join('');
-      } catch (e) {
-        console.error('Error loading trash cans:', e);
-      }
-    }
-
     async function downloadQR(canId) {
       try {
-        const res = await fetch(`${API}/api/qr?canId=${encodeURIComponent(canId)}`);
-        if (!res.ok) {
-          alert('Error generating QR code');
-          return;
+        const qrUrl = API + '/api/qr?canId=' + encodeURIComponent(canId);
+        const response = await fetch(qrUrl);
+        if (!response.ok) {
+          throw new Error('Failed to generate QR code');
         }
-
-        const blob = await res.blob();
+        const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `can-${canId}.png`;
+        a.download = `qr-${canId}.png`;
         document.body.appendChild(a);
         a.click();
-        window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
-      } catch (e) {
-        alert('Error downloading QR: ' + e.message);
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Error downloading QR code: ' + (err.message || 'Network error'));
       }
     }
 
-    // Load trash cans when switching to admin tab
-    const originalSwitchTab = switchTab;
-    switchTab = function(page) {
-      originalSwitchTab.call(this, page);
-      if (page === 'admin') {
-        loadTrashCans();
+    function updatePointsTracker() {
+      const pts = state.points || 0;
+      const pct = Math.min(100, (pts / 1000) * 100);
+      const numEl = document.getElementById('trackerPointsNumber');
+      const fillEl = document.getElementById('pointsTrackerFill');
+      const capEl = document.getElementById('pointsTrackerCap');
+      if (numEl) numEl.textContent = pts;
+      if (fillEl) {
+        fillEl.style.width = pct + '%';
+        fillEl.style.borderRadius = pct >= 100 ? '12px' : '12px 0 0 12px';
       }
-    };
+      if (capEl) {
+        capEl.style.left = pct + '%';
+        capEl.style.display = pts > 0 ? 'block' : 'none';
+      }
+    }
+
+    function loadPoints() {
+      try {
+        const p = parseInt(localStorage.getItem('cc_points'), 10);
+        const s = parseInt(localStorage.getItem('cc_streak'), 10);
+        state.points = isNaN(p) ? 0 : p;
+        state.streak = isNaN(s) ? 0 : s;
+      } catch (_) {}
+      const pd = document.getElementById('pointsDisplay');
+      const pp = document.getElementById('profilePointsDisplay');
+      const sd = document.getElementById('streakDays');
+      const ps = document.getElementById('profileStreakDays');
+      const hp = document.getElementById('headerPts');
+      if (pd) pd.textContent = state.points;
+      if (pp) pp.textContent = state.points;
+      if (sd) sd.textContent = state.streak;
+      if (ps) ps.textContent = state.streak;
+      if (hp) hp.textContent = state.points + ' pts';
+      updatePointsTracker();
+    }
+
+    function showProductModal(data, barcode) {
+      state.pendingBarcode = barcode;
+      const title = document.getElementById('productModalTitle');
+      const img = document.getElementById('productModalImg');
+      const brand = document.getElementById('productModalBrand');
+      const desc = document.getElementById('productModalDesc');
+      
+      // Handle product data - use provided data or defaults
+      // Make sure we get the actual product name, not "Unknown" if data exists
+      let name = 'Unknown';
+      if (data && data.name) {
+        name = data.name.trim();
+        // If name is "Unknown" but we have brand, use brand as name
+        if (name === 'Unknown' && data.brand && data.brand.trim()) {
+          name = data.brand.trim();
+        }
+      }
+      // If still unknown, show barcode
+      if (!name || name === 'Unknown') {
+        name = `Product (Barcode: ${barcode})`;
+      }
+      
+      const brandStr = (data && data.brand) ? (data.brand.trim() || 'Unknown') : 'Unknown';
+      let catStr = (data && data.category) ? data.category : 'Unknown';
+      
+      // Format category string - if it's a comma-separated string, keep it; otherwise format it
+      if (catStr && catStr !== 'Unknown' && typeof catStr === 'string') {
+        // If it's already formatted with commas, use as-is
+        if (catStr.includes(',')) {
+          catStr = catStr;
+        }
+      }
+      
+      // Set title
+      if (title) title.textContent = name;
+      
+      // Set brand
+      if (brand) brand.textContent = brandStr;
+      
+      // Set description
+      if (desc) {
+        const brandDisplay = brandStr === 'Unknown' ? '—' : brandStr;
+        const catDisplay = catStr === 'Unknown' ? '—' : catStr;
+        desc.innerHTML = 'Brand: ' + brandDisplay + '<br>Category: ' + catDisplay;
+      }
+      
+      // Set image
+      if (img) {
+        if (data && data.image) {
+          // Handle both relative and absolute URLs
+          const imgSrc = data.image.startsWith('http') ? data.image : (data.image.startsWith('/') ? API + data.image : data.image);
+          img.src = imgSrc;
+          img.alt = name;
+          img.style.display = 'block';
+        } else {
+          img.style.display = 'none';
+          img.removeAttribute('src');
+        }
+      }
+      
+      const modal = document.getElementById('productConfirmModal');
+      if (modal) {
+        modal.classList.add('show');
+      }
+    }
+    function closeProductModal() {
+      state.pendingBarcode = null;
+      document.getElementById('productConfirmModal').classList.remove('show');
+    }
+    async function confirmProductYes() {
+      if (!state.pendingBarcode) {
+        closeProductModal();
+        return;
+      }
+      const email = authState.user?.email || 'demo@clear.cycle';
+      try {
+        // Start recycle session
+        const startRes = await fetch(API + '/api/recycle/session/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const startData = await startRes.json();
+        if (!startRes.ok || !startData.sessionId) {
+          throw new Error(startData.error || 'Failed to start session');
+        }
+        state.recycleSession = startData.sessionId;
+        state.recycleStep = 'bin';
+        // Submit product barcode
+        const productRes = await fetch(API + '/api/recycle/session/' + startData.sessionId + '/product', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode: state.pendingBarcode })
+        });
+        const productData = await productRes.json();
+        if (!productRes.ok) {
+          throw new Error(productData.error || 'Failed to submit product');
+        }
+        closeProductModal();
+        const status = document.getElementById('status');
+        if (status) status.textContent = 'Product confirmed! Now scan the trash can QR code';
+        updateScanSteps();
+      } catch (err) {
+        alert('Error: ' + (err.message || 'Failed to confirm product'));
+        closeProductModal();
+      }
+    }
+    function confirmProductNo() {
+      state.pendingBarcode = null;
+      state.recycleSession = null;
+      state.recycleStep = null;
+      const status = document.getElementById('status');
+      if (status) status.textContent = 'Ready to scan';
+      closeProductModal();
+    }
+    function updateScanSteps() {
+      const step1 = document.getElementById('step1');
+      const step2 = document.getElementById('step2');
+      const step3 = document.getElementById('step3');
+      if (step1) step1.style.color = state.recycleStep === 'product' || !state.recycleStep ? '#1A2341' : '#2E8B57';
+      if (step2) step2.style.color = state.recycleStep === 'bin' ? '#1A2341' : (state.recycleStep === 'video' ? '#2E8B57' : '#64748b');
+      if (step3) step3.style.color = state.recycleStep === 'video' ? '#1A2341' : '#64748b';
+    }
+    function showTrashCanModal(canId, label, location, imageUrl) {
+      const title = document.getElementById('trashCanModalTitle');
+      const id = document.getElementById('trashCanModalId');
+      const locationEl = document.getElementById('trashCanModalLocation');
+      const img = document.getElementById('trashCanModalImg');
+      
+      // Title should always be "Is this the correct trash can?"
+      if (title) title.textContent = 'Is this the correct trash can?';
+      
+      // Display the can ID (e.g., TC001) - this is what the user wants to see
+      if (id) id.textContent = canId || 'Unknown';
+      
+      // Display location (e.g., "Smayans house")
+      if (locationEl) locationEl.textContent = location || label || 'Unknown location';
+      
+      // Display image if available
+      if (img) {
+        if (imageUrl) {
+          // Handle both relative and absolute URLs
+          const imgSrc = imageUrl.startsWith('http') ? imageUrl : (API + imageUrl);
+          img.src = imgSrc;
+          img.alt = label || canId;
+          img.style.display = 'block';
+        } else {
+          img.style.display = 'none';
+          img.removeAttribute('src');
+        }
+      }
+      
+      document.getElementById('trashCanConfirmModal').classList.add('show');
+    }
+    function closeTrashCanModal() {
+      document.getElementById('trashCanConfirmModal').classList.remove('show');
+    }
+    async function confirmTrashCanYes() {
+      if (!state.recycleSession || !state.pendingBarcode) {
+        closeTrashCanModal();
+        return;
+      }
+      try {
+        const binRes = await fetch(API + '/api/recycle/session/' + state.recycleSession + '/bin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode: state.pendingBarcode })
+        });
+        const binData = await binRes.json();
+        if (!binRes.ok) {
+          throw new Error(binData.error || 'Failed to submit trash can');
+        }
+        state.recycleStep = 'video';
+        state.pendingBarcode = null;
+        closeTrashCanModal();
+        const status = document.getElementById('status');
+        if (status) status.textContent = 'Trash can confirmed! Ready to record video';
+        updateScanSteps();
+        // Show video recording modal
+        setTimeout(() => {
+          document.getElementById('videoRecordModal').classList.add('show');
+          setupVideoRecording();
+        }, 500);
+      } catch (err) {
+        alert('Error: ' + (err.message || 'Failed to confirm trash can'));
+        closeTrashCanModal();
+      }
+    }
+    function confirmTrashCanNo() {
+      state.pendingBarcode = null;
+      const status = document.getElementById('status');
+      if (status) status.textContent = 'Scan the correct trash can QR code';
+      closeTrashCanModal();
+    }
+
+    const reader = new (typeof ZXing !== 'undefined' ? ZXing : window.ZXing).BrowserMultiFormatReader();
+    function startScan() {
+      if (state.isScanning) return;
+      const video = document.getElementById('video');
+      if (!video) return;
+      state.isScanning = true;
+      const status = document.getElementById('status');
+      const btn = document.getElementById('scanBtn');
+      
+      // Determine what we're scanning based on current step
+      const currentStep = state.recycleStep || 'product';
+      if (status) {
+        status.textContent = currentStep === 'product' ? 'Starting camera...' : 'Scanning QR code...';
+      }
+      if (btn) btn.disabled = true;
+      
+      reader.decodeFromVideoDevice(undefined, video, (result, err) => {
+        if (result) {
+          state.isScanning = false;
+          if (btn) btn.disabled = false;
+          const barcode = result.getText();
+          try { reader.reset(); } catch (_) {}
+          if (video.srcObject) {
+            video.srcObject.getTracks().forEach(t => t.stop());
+            video.srcObject = null;
+          }
+          
+          if (currentStep === 'product') {
+            // Step 1: Product scan
+            if (status) status.textContent = 'Looking up product...';
+            
+            // Use a timeout to prevent hanging
+            const fetchWithTimeout = (url, timeout = 10000) => {
+              return Promise.race([
+                fetch(url),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Request timeout')), timeout)
+                )
+              ]);
+            };
+            
+            fetchWithTimeout(API + '/api/product?barcode=' + encodeURIComponent(barcode))
+              .then(r => {
+                if (!r.ok) {
+                  // If API returns error, still try to parse JSON for error message
+                  return r.json().then(errData => {
+                    // Return a not-found response instead of throwing
+                    return { found: false, error: errData.error || 'Product not found' };
+                  }).catch(() => {
+                    // Return not-found if can't parse error
+                    return { found: false, error: 'Product lookup failed' };
+                  });
+                }
+                return r.json();
+              })
+              .then(data => {
+                console.log('Product API response:', JSON.stringify(data, null, 2));
+                // Always show the modal - even if product not found, user can still proceed
+                if (data && data.found !== false && data.name && data.name.trim() && data.name !== 'Unknown') {
+                  // Product found with valid name - show it
+                  const productData = {
+                    name: data.name.trim(),
+                    brand: (data.brand && data.brand.trim()) || 'Unknown',
+                    category: (data.category && data.category.trim()) || 'Unknown',
+                    image: data.image || null
+                  };
+                  console.log('Showing product with name:', productData.name);
+                  showProductModal(productData, barcode);
+                  if (status) status.textContent = 'Confirm product to continue';
+                } else if (data && data.found === true && data.name) {
+                  // Product found but name might be empty - try to use brand
+                  const productName = (data.name && data.name.trim() && data.name !== 'Unknown') 
+                    ? data.name.trim() 
+                    : ((data.brand && data.brand.trim()) ? data.brand.trim() : `Product (Barcode: ${barcode})`);
+                  const productData = {
+                    name: productName,
+                    brand: (data.brand && data.brand.trim()) || 'Unknown',
+                    category: (data.category && data.category.trim()) || 'Unknown',
+                    image: data.image || null
+                  };
+                  console.log('Showing product (fallback name):', productData.name);
+                  showProductModal(productData, barcode);
+                  if (status) status.textContent = 'Confirm product to continue';
+                } else {
+                  // Product not found or invalid - show modal with barcode
+                  console.log('Product not found, showing fallback');
+                  showProductModal({
+                    name: `Product (Barcode: ${barcode})`,
+                    brand: 'Unknown',
+                    category: 'Unknown',
+                    image: null
+                  }, barcode);
+                  if (status) status.textContent = 'Product not found. Confirm to continue.';
+                }
+              })
+              .catch((err) => {
+                console.error('Product lookup error:', err);
+                // Show modal with barcode even on error - allow user to proceed
+                // Silently handle the error - don't show alerts
+                showProductModal({
+                  name: `Product (Barcode: ${barcode})`,
+                  brand: 'Unknown',
+                  category: 'Unknown',
+                  image: null
+                }, barcode);
+                if (status) status.textContent = 'Product details unavailable. Confirm to continue.';
+              });
+          } else if (currentStep === 'bin') {
+            // Step 2: QR code scan for trash can
+            // Extract can ID from QR code - could be just "TC001" or a URL like "/can/TC001"
+            let canId = barcode;
+            if (barcode.includes('/can/')) {
+              // Extract from URL format
+              const match = barcode.match(/\/can\/([^\/\s]+)/);
+              if (match) canId = match[1];
+            } else if (barcode.includes('canId=')) {
+              // Extract from query param format
+              const match = barcode.match(/canId=([^&\s]+)/);
+              if (match) canId = decodeURIComponent(match[1]);
+            }
+            // Clean up the can ID
+            canId = canId.trim();
+            state.pendingBarcode = canId;
+            
+            if (status) status.textContent = 'Looking up trash can...';
+            fetch(API + '/api/trash-cans/' + encodeURIComponent(canId))
+              .then(r => {
+                if (!r.ok && r.status === 404) {
+                  // In demo mode, still allow it
+                  if (status) status.textContent = 'Trash can not found, but continuing in demo mode...';
+                  showTrashCanModal(canId, 'Unknown Trash Can', 'Unknown location', null);
+                  return;
+                }
+                return r.json();
+              })
+              .then(data => {
+                if (!data) return; // Already handled above
+                const can = data.can || data;
+                // Make sure we have the can ID (should be TC001, TC002, etc.)
+                const finalCanId = can.id || canId;
+                showTrashCanModal(finalCanId, can.label, can.location, can.image);
+                if (status) status.textContent = 'Confirm trash can to continue';
+              })
+              .catch((err) => {
+                console.error('Error fetching trash can:', err);
+                // Still show modal even if can not found (for demo mode)
+                showTrashCanModal(canId, 'Unknown Trash Can', 'Unknown location', null);
+                if (status) status.textContent = 'Confirm trash can to continue';
+              });
+          }
+        }
+      }).catch(e => {
+        state.isScanning = false;
+        if (btn) btn.disabled = false;
+        if (status) status.textContent = 'Camera error: ' + (e.message || 'Could not start');
+      });
+    }
+    
+    let videoTimerInterval = null;
+    let videoStartTime = null;
+    async function setupVideoRecording() {
+      const recordVideo = document.getElementById('recordVideo');
+      if (!recordVideo) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        recordVideo.srcObject = stream;
+      } catch (err) {
+        alert('Camera access denied: ' + err.message);
+        cancelVideoRecording();
+      }
+    }
+    function startVideoRecording() {
+      const recordVideo = document.getElementById('recordVideo');
+      if (!recordVideo || !recordVideo.srcObject) {
+        alert('Camera not ready. Please wait a moment and try again.');
+        return;
+      }
+      
+      // Reset any previous recording state
+      state.recordedChunks = [];
+      state.isRecording = true;
+      
+      const startBtn = document.getElementById('startRecordBtn');
+      const stopBtn = document.getElementById('stopRecordBtn');
+      if (startBtn) {
+        startBtn.style.display = 'none';
+        startBtn.disabled = true;
+      }
+      if (stopBtn) {
+        stopBtn.style.display = 'block';
+        stopBtn.disabled = false;
+        stopBtn.textContent = 'Stop & Submit';
+      }
+      
+      const stream = recordVideo.srcObject;
+      // Try different MIME types for better compatibility
+      let mimeType = 'video/webm;codecs=vp8';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/webm';
+      }
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/mp4';
+      }
+      
+      state.mediaRecorder = new MediaRecorder(stream, { 
+        mimeType,
+        videoBitsPerSecond: 2500000 // 2.5 Mbps for better quality
+      });
+      
+      // Request data more frequently to ensure we capture all frames
+      state.mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          console.log('Received video chunk:', e.data.size, 'bytes');
+          state.recordedChunks.push(e.data);
+        }
+      };
+      
+      state.mediaRecorder.onerror = (e) => {
+        console.error('MediaRecorder error:', e);
+        alert('Recording error occurred. Please try again.');
+        resetVideoRecordingState();
+      };
+      
+      try {
+        // Start recording and request data every 100ms to ensure we get all frames
+        state.mediaRecorder.start(100);
+        console.log('MediaRecorder started, recording...');
+      } catch (err) {
+        console.error('Error starting recorder:', err);
+        alert('Failed to start recording: ' + err.message);
+        resetVideoRecordingState();
+        return;
+      }
+      
+      videoStartTime = Date.now();
+      const timerEl = document.getElementById('videoTimer');
+      if (timerEl) timerEl.textContent = '0s';
+      
+      videoTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - videoStartTime) / 1000);
+        if (timerEl) timerEl.textContent = elapsed + 's';
+        if (elapsed >= 5) {
+          stopVideoRecording();
+        }
+      }, 50); // Update more frequently for smoother timer
+    }
+    async function stopVideoRecording() {
+      if (!state.mediaRecorder) return;
+      if (state.mediaRecorder.state === 'inactive') return;
+      
+      const wasRecording = state.isRecording;
+      state.isRecording = false;
+      
+      if (videoTimerInterval) {
+        clearInterval(videoTimerInterval);
+        videoTimerInterval = null;
+      }
+      
+      const stopBtn = document.getElementById('stopRecordBtn');
+      if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.textContent = 'Uploading...';
+      }
+      
+      const status = document.getElementById('status');
+      if (status) status.textContent = 'Uploading video for verification...';
+      
+      // Wait for recorder to stop and get the blob
+      return new Promise((resolve) => {
+        state.mediaRecorder.onstop = async () => {
+          try {
+            const blob = new Blob(state.recordedChunks, { type: 'video/webm' });
+            await uploadVideoForVerification(blob);
+            resolve();
+          } catch (err) {
+            console.error('Error in onstop:', err);
+            resetVideoRecordingState();
+            resolve();
+          }
+        };
+        
+        // Stop the recorder
+        if (state.mediaRecorder.state !== 'inactive') {
+          state.mediaRecorder.stop();
+        }
+        
+        // Stop camera after a short delay
+        setTimeout(() => {
+          const recordVideo = document.getElementById('recordVideo');
+          if (recordVideo && recordVideo.srcObject) {
+            recordVideo.srcObject.getTracks().forEach(t => t.stop());
+            recordVideo.srcObject = null;
+          }
+        }, 100);
+      });
+    }
+    
+    function resetVideoRecordingState() {
+      // Reset all video recording state
+      state.mediaRecorder = null;
+      state.isRecording = false;
+      state.recordedChunks = [];
+      videoStartTime = null;
+      if (videoTimerInterval) {
+        clearInterval(videoTimerInterval);
+        videoTimerInterval = null;
+      }
+      
+      const startBtn = document.getElementById('startRecordBtn');
+      const stopBtn = document.getElementById('stopRecordBtn');
+      const timerEl = document.getElementById('videoTimer');
+      
+      if (startBtn) {
+        startBtn.style.display = 'block';
+        startBtn.disabled = false;
+      }
+      if (stopBtn) {
+        stopBtn.style.display = 'none';
+        stopBtn.disabled = false;
+        stopBtn.textContent = 'Stop & Submit';
+      }
+      if (timerEl) timerEl.textContent = '0s';
+      
+      // Stop camera
+      const recordVideo = document.getElementById('recordVideo');
+      if (recordVideo && recordVideo.srcObject) {
+        recordVideo.srcObject.getTracks().forEach(t => t.stop());
+        recordVideo.srcObject = null;
+      }
+    }
+    function cancelVideoRecording() {
+      if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+        try {
+          state.mediaRecorder.stop();
+        } catch (e) {
+          console.error('Error stopping recorder:', e);
+        }
+      }
+      resetVideoRecordingState();
+      state.recycleSession = null;
+      state.recycleStep = null;
+      state.pendingBarcode = null;
+      document.getElementById('videoRecordModal').classList.remove('show');
+      const status = document.getElementById('status');
+      if (status) status.textContent = 'Ready to scan';
+      updateScanSteps();
+    }
+    async function extractFramesFromVideo(videoBlob) {
+      return new Promise((resolve, reject) => {
+        console.log('Starting frame extraction, blob size:', videoBlob.size, 'type:', videoBlob.type);
+        
+        const video = document.createElement('video');
+        const url = URL.createObjectURL(videoBlob);
+        video.src = url;
+        video.muted = true;
+        video.playsInline = true;
+        video.crossOrigin = 'anonymous';
+        
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const frames = [];
+        const frameCount = 3;
+        let timeoutId = null;
+        let isResolved = false;
+        
+        const cleanup = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          URL.revokeObjectURL(url);
+        };
+        
+        const resolveOnce = (result) => {
+          if (isResolved) return;
+          isResolved = true;
+          cleanup();
+          resolve(result);
+        };
+        
+        const rejectOnce = (error) => {
+          if (isResolved) return;
+          isResolved = true;
+          cleanup();
+          reject(error);
+        };
+        
+        // Set timeout
+        timeoutId = setTimeout(() => {
+          if (frames.length > 0) {
+            console.log(`Timeout but got ${frames.length} frames`);
+            resolveOnce(frames);
+          } else {
+            rejectOnce(new Error('Frame extraction timeout'));
+          }
+        }, 15000);
+        
+        // Wait for video to be ready to play
+        const extractFrames = async () => {
+          try {
+            // Play the video to ensure it's ready
+            await video.play();
+            // Pause immediately
+            video.pause();
+            
+            const width = video.videoWidth;
+            const height = video.videoHeight;
+            const duration = video.duration;
+            
+            console.log(`Video ready: ${width}x${height}, duration: ${duration}s`);
+            
+            if (!width || !height || width === 0 || height === 0) {
+              rejectOnce(new Error('Video has invalid dimensions'));
+              return;
+            }
+            
+            if (!duration || isNaN(duration) || duration <= 0) {
+              rejectOnce(new Error('Video has invalid duration'));
+              return;
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Extract frames at different points in the video
+            const times = [
+              duration * 0.2,  // 20% through
+              duration * 0.5,  // 50% through
+              duration * 0.8   // 80% through
+            ];
+            
+            let extracted = 0;
+            
+            const extractFrameAtTime = (time) => {
+              return new Promise((frameResolve) => {
+                const seekHandler = () => {
+                  video.removeEventListener('seeked', seekHandler);
+                  try {
+                    // Draw the current frame
+                    ctx.drawImage(video, 0, 0, width, height);
+                    const frameData = canvas.toDataURL('image/jpeg', 0.85);
+                    
+                    // Verify we got actual image data (not just black)
+                    if (frameData && frameData.length > 5000) { // At least 5KB of data
+                      frames.push(frameData);
+                      console.log(`Extracted frame ${frames.length} at ${time.toFixed(2)}s`);
+                    }
+                    
+                    extracted++;
+                    frameResolve();
+                  } catch (e) {
+                    console.error('Error drawing frame:', e);
+                    extracted++;
+                    frameResolve();
+                  }
+                };
+                
+                video.addEventListener('seeked', seekHandler, { once: true });
+                video.currentTime = Math.max(0.1, Math.min(time, duration - 0.1));
+              });
+            };
+            
+            // Extract all frames sequentially
+            for (const time of times) {
+              await extractFrameAtTime(time);
+            }
+            
+            if (frames.length > 0) {
+              console.log(`Successfully extracted ${frames.length} frames`);
+              resolveOnce(frames);
+            } else {
+              rejectOnce(new Error('No valid frames extracted'));
+            }
+          } catch (err) {
+            console.error('Error in extractFrames:', err);
+            rejectOnce(new Error('Frame extraction failed: ' + err.message));
+          }
+        };
+        
+        // Wait for video to load metadata and be ready
+        video.addEventListener('loadedmetadata', () => {
+          console.log('Video metadata loaded');
+        }, { once: true });
+        
+        video.addEventListener('loadeddata', () => {
+          console.log('Video data loaded');
+        }, { once: true });
+        
+        video.addEventListener('canplaythrough', () => {
+          console.log('Video can play through');
+          extractFrames().catch(rejectOnce);
+        }, { once: true });
+        
+        video.addEventListener('error', (e) => {
+          console.error('Video error:', e, video.error);
+          const errorMsg = video.error 
+            ? `Video error ${video.error.code}: ${video.error.message}` 
+            : 'Video load error';
+          rejectOnce(new Error(errorMsg));
+        }, { once: true });
+        
+        // Start loading
+        video.load();
+      });
+    }
+    async function uploadVideoForVerification(videoBlob) {
+      if (!state.recycleSession) {
+        alert('Session expired. Please start over.');
+        resetVideoRecordingState();
+        document.getElementById('videoRecordModal').classList.remove('show');
+        return;
+      }
+      
+      const status = document.getElementById('status');
+      const stopBtn = document.getElementById('stopRecordBtn');
+      
+      try {
+        // Update status
+        if (status) status.textContent = 'Extracting frames from video...';
+        if (stopBtn) stopBtn.textContent = 'Processing...';
+        
+        // Extract frames with timeout
+        let frames = [];
+        try {
+          const framesPromise = extractFramesFromVideo(videoBlob);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Frame extraction timeout')), 20000)
+          );
+          frames = await Promise.race([framesPromise, timeoutPromise]);
+          console.log(`Successfully extracted ${frames.length} frames from video`);
+          
+          if (!frames || frames.length === 0) {
+            throw new Error('No frames extracted from video');
+          }
+          
+          // Verify frames have actual content (not just black)
+          const validFrames = frames.filter(frame => {
+            // Check if frame is a valid data URL with reasonable size
+            return frame && frame.startsWith('data:image') && frame.length > 10000;
+          });
+          
+          if (validFrames.length === 0) {
+            throw new Error('All extracted frames appear to be invalid or empty');
+          }
+          
+          frames = validFrames;
+          console.log(`Using ${frames.length} valid frames`);
+        } catch (frameErr) {
+          console.error('Frame extraction error:', frameErr);
+          throw new Error('Could not extract valid frames from video: ' + frameErr.message);
+        }
+        
+        if (status) status.textContent = 'Uploading video...';
+        if (stopBtn) stopBtn.textContent = 'Uploading...';
+        
+        const formData = new FormData();
+        formData.append('video', videoBlob, 'recycle-video.webm');
+        formData.append('frames', JSON.stringify(frames));
+        
+        // Upload with timeout
+        const uploadPromise = fetch(API + '/api/recycle/session/' + state.recycleSession + '/video', {
+          method: 'POST',
+          body: formData
+        });
+        const uploadTimeout = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Upload timeout')), 60000)
+        );
+        const res = await Promise.race([uploadPromise, uploadTimeout]);
+        
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({ error: 'Upload failed' }));
+          throw new Error(errorData.error || `Upload failed: ${res.status}`);
+        }
+        
+        const data = await res.json();
+        console.log('Verification response:', JSON.stringify(data, null, 2));
+        
+        // Make sure we have valid data
+        if (!data || typeof data !== 'object') {
+          throw new Error('Invalid response from server');
+        }
+        
+        // Reset video recording state first
+        resetVideoRecordingState();
+        document.getElementById('videoRecordModal').classList.remove('show');
+        
+        // Reset recycle session state
+        const sessionId = state.recycleSession;
+        state.recycleSession = null;
+        state.recycleStep = null;
+        state.pendingBarcode = null;
+        
+        // ALWAYS show verification result - never skip this
+        const verified = Boolean(data.verified);
+        const pointsAwarded = Number(data.pointsAwarded || 0);
+        const verdict = data.verdict || {};
+        const confidence = Number(data.confidence || 0);
+        
+        console.log('Showing verification result:', { verified, pointsAwarded, confidence, verdict });
+        
+        if (verified && pointsAwarded > 0) {
+          // Update points from server
+          if (authState.user && authState.user.email) {
+            try {
+              const userRes = await fetch(API + '/api/user/' + encodeURIComponent(authState.user.email));
+              const userData = await userRes.json();
+              if (userData.user) {
+                state.points = userData.user.points || 0;
+                localStorage.setItem('cc_points', String(state.points));
+                loadPoints();
+              }
+            } catch (e) {
+              console.error('Error fetching user points:', e);
+            }
+          }
+          if (status) status.textContent = `Verified! +${pointsAwarded} points earned!`;
+          showVerificationResult(true, pointsAwarded, verdict, confidence);
+        } else {
+          if (status) status.textContent = 'Verification failed. Please try again.';
+          const reason = verdict.notes || verdict.note || data.error || 'Video did not meet requirements. Make sure the item enters the trash can.';
+          showVerificationResult(false, 0, verdict, confidence, reason);
+        }
+        
+        updateScanSteps();
+      } catch (err) {
+        console.error('Upload error:', err);
+        resetVideoRecordingState();
+        document.getElementById('videoRecordModal').classList.remove('show');
+        
+        // ALWAYS show result modal even on error
+        const errorMsg = err.message || 'Network error';
+        showVerificationResult(false, 0, { pass: false, notes: errorMsg }, 0, errorMsg);
+        
+        state.recycleSession = null;
+        state.recycleStep = null;
+        if (status) status.textContent = 'Ready to scan';
+        updateScanSteps();
+      }
+    }
+
+    function showVerificationResult(verified, points, verdict, confidence, errorMsg) {
+      const modal = document.getElementById('verificationResultModal');
+      const title = document.getElementById('verificationResultTitle');
+      const message = document.getElementById('verificationResultMessage');
+      const details = document.getElementById('verificationResultDetails');
+      
+      console.log('Showing verification result modal:', { verified, points, confidence, verdict });
+      
+      if (verified) {
+        if (title) {
+          title.textContent = '✅ Verification Successful!';
+          title.style.color = '#2F6A2F';
+        }
+        if (message) {
+          message.innerHTML = `<strong style="font-size:18px; color:#2F6A2F;">You earned ${points} points!</strong><br><br>Your video was verified successfully.`;
+        }
+        if (details) {
+          const conf = confidence ? (Math.round(confidence * 100) + '%') : 'N/A';
+          const checks = verdict ? [
+            verdict.bin_visible !== false ? '✓ Bin visible' : '✗ Bin not visible',
+            verdict.bottle_visible !== false ? '✓ Item visible' : '✗ Item not visible',
+            verdict.disposal_action !== false ? '✓ Disposal action' : '✗ No disposal action',
+            verdict.item_enters_bin !== false ? '✓ Item enters bin' : '✗ Item does not enter bin'
+          ].join('<br>') : 'All checks passed';
+          details.innerHTML = `Confidence: ${conf}<br><br>Verification Checks:<br>${checks}`;
+        }
+      } else {
+        if (title) {
+          title.textContent = '❌ Verification Failed';
+          title.style.color = '#dc2626';
+        }
+        if (message) {
+          message.innerHTML = `<strong style="font-size:18px; color:#dc2626;">Verification failed</strong><br><br>${errorMsg || 'Video did not meet requirements.'}`;
+        }
+        if (details) {
+          const conf = confidence ? (Math.round(confidence * 100) + '%') : '0%';
+          const checks = verdict && typeof verdict === 'object' ? [
+            verdict.bin_visible === true ? '✓ Bin visible' : (verdict.bin_visible === false ? '✗ Bin not visible' : '? Bin visibility unknown'),
+            verdict.bottle_visible === true ? '✓ Item visible' : (verdict.bottle_visible === false ? '✗ Item not visible' : '? Item visibility unknown'),
+            verdict.disposal_action === true ? '✓ Disposal action' : (verdict.disposal_action === false ? '✗ No disposal action' : '? Disposal action unknown'),
+            verdict.item_enters_bin === true ? '✓ Item enters bin' : (verdict.item_enters_bin === false ? '✗ Item does not enter bin' : '? Item entry unknown')
+          ].join('<br>') : 'Verification details unavailable';
+          details.innerHTML = `Confidence: ${conf}<br><br>Verification Checks:<br>${checks}`;
+        }
+      }
+      
+      if (modal) {
+        modal.classList.add('show');
+        console.log('Verification result modal shown');
+      } else {
+        console.error('Verification result modal element not found!');
+        // Fallback to alert if modal doesn't exist
+        if (verified) {
+          alert(`✅ Verification Successful! You earned ${points} points.`);
+        } else {
+          alert(`❌ Verification Failed: ${errorMsg || 'Video did not meet requirements.'}`);
+        }
+      }
+    }
+    
+    function closeVerificationModal() {
+      document.getElementById('verificationResultModal').classList.remove('show');
+    }
 
     loadPoints();
+    updateAuthUI();
   </script>
 </body>
 </html>
