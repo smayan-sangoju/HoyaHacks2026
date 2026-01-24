@@ -787,14 +787,9 @@ app.post('/api/recycle/session/:sessionId/product', recycleRateLimit, async (req
     const s = getSessionOrThrow(sessionId)
     if (s.step !== 'product') return res.status(409).json({ error: `Invalid step. Expected product, got ${s.step}` })
 
-    // Anti-cheat: per-user-per-product cooldown window
-    const recentSame = await RecycleEvent.find({ userId: s.userId, productBarcode: barcode })
-      .sort({ timestamp: -1 })
-      .limit(1)
-      .lean()
-    if (recentSame && recentSame[0] && Date.now() - new Date(recentSame[0].timestamp).getTime() < USER_PRODUCT_COOLDOWN_MS) {
-      return res.status(429).json({ error: 'Cooldown: product already scanned recently for this user' })
-    }
+    // Allow scanning the same product multiple times (cooldown disabled)
+    // Users can scan the same barcode multiple times since all items have the same barcode
+    // No cooldown check - removed to allow multiple scans of the same product
 
     s.productBarcode = String(barcode)
     s.step = 'bin'
@@ -1032,6 +1027,89 @@ async function lookupGeneralBarcode(barcode) {
   }
 }
 
+// Helper function to check recyclability using AI
+async function checkRecyclability(productName, brand, category) {
+  try {
+    const key = process.env.OPENROUTER_API_KEY
+    if (!key) {
+      console.log('No OpenRouter API key, skipping recyclability check')
+      return { recyclable: null, message: 'API key not configured', confidence: 0 }
+    }
+    
+    console.log('Starting recyclability check with OpenRouter API')
+
+    const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
+    const siteUrl = process.env.OPENROUTER_SITE_URL || 'http://localhost'
+    const title = process.env.OPENROUTER_APP_TITLE || 'ClearCycle'
+
+    const prompt = `Analyze this product and determine if it's recyclable. Return ONLY valid JSON (no markdown, no extra text).
+
+Product: ${productName || 'Unknown'}
+Brand: ${brand || 'Unknown'}
+Category: ${category || 'Unknown'}
+
+Return JSON with these keys:
+- recyclable (boolean): true if the product/item is commonly recyclable, false if not
+- message (string): A short message (max 50 words) explaining why it is or isn't recyclable
+- confidence (number 0-1): How confident you are in this assessment
+
+Consider:
+- Common recyclable items: plastic bottles (#1, #2), aluminum cans, glass bottles, cardboard, paper
+- Non-recyclable items: plastic bags, styrofoam, certain plastics (#3, #6, #7), contaminated items
+- If information is insufficient, set recyclable to null and message to "Unable to determine recyclability"`
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': siteUrl,
+        'X-Title': title
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        messages: [
+          { role: 'user', content: prompt }
+        ]
+      }),
+      signal: controller.signal
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!resp.ok) {
+      console.error('Recyclability check API error:', resp.status)
+      return { recyclable: null, message: null, confidence: 0 }
+    }
+
+    const data = await resp.json()
+    const text = data?.choices?.[0]?.message?.content
+    const obj = extractJsonObject(typeof text === 'string' ? text : JSON.stringify(text))
+
+    if (!obj) {
+      console.error('Failed to parse recyclability response')
+      return { recyclable: null, message: null, confidence: 0 }
+    }
+
+    return {
+      recyclable: obj.recyclable === true ? true : (obj.recyclable === false ? false : null),
+      message: obj.message || null,
+      confidence: Number(obj.confidence || 0)
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      console.error('Recyclability check timeout')
+    } else {
+      console.error('Recyclability check error:', err.message)
+    }
+    return { recyclable: null, message: null, confidence: 0 }
+  }
+}
+
 // GET /api/product?barcode=...
 // Cascade: local DB → OpenFoodFacts → general API → not found
 app.get('/api/product', async (req, res) => {
@@ -1044,7 +1122,12 @@ app.get('/api/product', async (req, res) => {
     // 1. Check local database first
     let product = await Product.findOne({ barcode })
     if (product) {
-      return res.json({
+      // Check recyclability - wait for it to complete before returning
+      console.log(`Checking recyclability for product: ${product.name}, brand: ${product.brand}, category: ${product.category}`)
+      const recyclabilityPromise = checkRecyclability(product.name, product.brand, product.category)
+      
+      // Return product info with recyclability
+      const productData = {
         found: true,
         barcode: product.barcode,
         name: product.name,
@@ -1055,7 +1138,36 @@ app.get('/api/product', async (req, res) => {
         source: product.source,
         confidence: product.confidence,
         needsVerification: !product.lastVerified && product.source !== 'manual'
+      }
+      
+      // Wait for recyclability check (with timeout)
+      try {
+        const recyclability = await Promise.race([
+          recyclabilityPromise,
+          new Promise((resolve) => {
+            setTimeout(() => {
+              console.log('Recyclability check timeout after 8 seconds')
+              resolve({ recyclable: null, message: null, confidence: 0 })
+            }, 8000)
+          })
+        ])
+        console.log('Recyclability result:', recyclability)
+        productData.recyclable = recyclability.recyclable
+        productData.recyclabilityMessage = recyclability.message
+        productData.recyclabilityConfidence = recyclability.confidence
+      } catch (err) {
+        console.error('Recyclability check error:', err)
+        productData.recyclable = null
+        productData.recyclabilityMessage = null
+        productData.recyclabilityConfidence = 0
+      }
+      
+      console.log('Returning product data with recyclability:', {
+        name: productData.name,
+        recyclable: productData.recyclable,
+        message: productData.recyclabilityMessage
       })
+      return res.json(productData)
     }
 
     // 2. Try OpenFoodFacts
@@ -1164,12 +1276,15 @@ app.get('/api/product', async (req, res) => {
         console.error('Error saving product to DB:', err)
       }
 
+      // Check recyclability
+      const recyclabilityPromise = checkRecyclability(cleanName, brand, category)
+      
       // Make sure we have a valid name before returning
       if (!cleanName || cleanName === 'Unknown' || cleanName.trim() === '') {
         console.warn(`Warning: Product name is empty for barcode ${barcode}, using brand or fallback`)
         // Try to use brand as name if name is missing
         const fallbackName = (brand && brand.trim()) ? brand.trim() : `Product (Barcode: ${barcode})`
-        return res.json({
+        const productData = {
           found: true,
           barcode,
           name: fallbackName,
@@ -1180,10 +1295,25 @@ app.get('/api/product', async (req, res) => {
           source: 'openfoodfacts',
           confidence,
           needsVerification: confidence === 'low' || confidence === 'medium'
-        })
+        }
+        
+        // Add recyclability
+        try {
+          const recyclability = await Promise.race([
+            recyclabilityPromise,
+            new Promise((resolve) => setTimeout(() => resolve({ recyclable: null, message: null, confidence: 0 }), 8000))
+          ])
+          productData.recyclable = recyclability.recyclable
+          productData.recyclabilityMessage = recyclability.message
+          productData.recyclabilityConfidence = recyclability.confidence
+        } catch (err) {
+          console.error('Recyclability check error:', err)
+        }
+        
+        return res.json(productData)
       }
       
-      return res.json({
+      const productData = {
         found: true,
         barcode,
         name: cleanName,
@@ -1194,7 +1324,22 @@ app.get('/api/product', async (req, res) => {
         source: 'openfoodfacts',
         confidence,
         needsVerification: confidence === 'low' || confidence === 'medium'
-      })
+      }
+      
+      // Add recyclability
+      try {
+        const recyclability = await Promise.race([
+          recyclabilityPromise,
+          new Promise((resolve) => setTimeout(() => resolve({ recyclable: null, message: null, confidence: 0 }), 8000))
+        ])
+        productData.recyclable = recyclability.recyclable
+        productData.recyclabilityMessage = recyclability.message
+        productData.recyclabilityConfidence = recyclability.confidence
+      } catch (err) {
+        console.error('Recyclability check error:', err)
+      }
+      
+      return res.json(productData)
     }
 
     // 3. Try general barcode API
@@ -1222,7 +1367,9 @@ app.get('/api/product', async (req, res) => {
         console.error('Error saving product to DB:', err)
       }
 
-      return res.json({
+      // Check recyclability
+      const recyclabilityPromise = checkRecyclability(name, brand, category)
+      const productData = {
         found: true,
         barcode,
         name,
@@ -1232,7 +1379,22 @@ app.get('/api/product', async (req, res) => {
         source: 'barcode_api',
         confidence,
         needsVerification: true
-      })
+      }
+      
+      // Add recyclability
+      try {
+        const recyclability = await Promise.race([
+          recyclabilityPromise,
+          new Promise((resolve) => setTimeout(() => resolve({ recyclable: null, message: null, confidence: 0 }), 8000))
+        ])
+        productData.recyclable = recyclability.recyclable
+        productData.recyclabilityMessage = recyclability.message
+        productData.recyclabilityConfidence = recyclability.confidence
+      } catch (err) {
+        console.error('Recyclability check error:', err)
+      }
+      
+      return res.json(productData)
     }
 
     // 4. Not found — return not found

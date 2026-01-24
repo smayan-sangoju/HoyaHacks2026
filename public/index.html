@@ -328,6 +328,7 @@
       </div>
       <div class="product-modal-brand" id="productModalBrand"></div>
       <div class="product-modal-desc" id="productModalDesc"></div>
+      <div id="productModalRecyclability" style="margin:12px 0; padding:10px 14px; border-radius:8px; font-size:13px; line-height:1.4; display:none;"></div>
       <div class="product-modal-btns">
         <button type="button" class="product-modal-btn-yes" id="productModalYes" onclick="confirmProductYes()">Yes</button>
         <button type="button" class="product-modal-btn-no" id="productModalNo" onclick="confirmProductNo()">No</button>
@@ -755,6 +756,8 @@
 
     function showProductModal(data, barcode) {
       state.pendingBarcode = barcode;
+      // Store product data for recyclability check
+      state.lastProductData = data || {};
       const title = document.getElementById('productModalTitle');
       const img = document.getElementById('productModalImg');
       const brand = document.getElementById('productModalBrand');
@@ -799,6 +802,61 @@
         desc.innerHTML = 'Brand: ' + brandDisplay + '<br>Category: ' + catDisplay;
       }
       
+      // Set recyclability message
+      const recyclabilityEl = document.getElementById('productModalRecyclability');
+      console.log('Recyclability element found:', !!recyclabilityEl);
+      console.log('Recyclability data:', {
+        recyclable: data?.recyclable,
+        message: data?.recyclabilityMessage,
+        confidence: data?.recyclabilityConfidence
+      });
+      
+      if (recyclabilityEl && data && data.recyclable !== undefined && data.recyclable !== null) {
+        console.log('Displaying recyclability:', data.recyclable === true ? 'RECYCLABLE' : 'NOT RECYCLABLE');
+        if (data.recyclable === true) {
+          recyclabilityEl.style.display = 'block';
+          recyclabilityEl.style.background = '#E8F5E9';
+          recyclabilityEl.style.color = '#2E7D32';
+          recyclabilityEl.style.border = '1px solid #81C784';
+          recyclabilityEl.innerHTML = '<strong style="font-size:14px;">✓ Recyclable</strong><br>' + 
+            (data.recyclabilityMessage || 'This item can be recycled.');
+        } else if (data.recyclable === false) {
+          recyclabilityEl.style.display = 'block';
+          recyclabilityEl.style.background = '#FFEBEE';
+          recyclabilityEl.style.color = '#C62828';
+          recyclabilityEl.style.border = '1px solid #EF5350';
+          recyclabilityEl.innerHTML = '<strong style="font-size:14px;">✗ Not Recyclable</strong><br>' + 
+            (data.recyclabilityMessage || 'This item cannot be recycled.') + 
+            '<br><span style="font-size:12px; font-style:italic;">Clicking "Yes" will cancel and return to home.</span>';
+          
+          // Disable or hide the Yes button, or change its behavior
+          const yesBtn = document.getElementById('productModalYes');
+          if (yesBtn) {
+            yesBtn.textContent = 'OK';
+            yesBtn.onclick = function() {
+              alert('This item is not recyclable. Please dispose of it in regular trash.');
+              closeProductModal();
+              state.pendingBarcode = null;
+              state.recycleSession = null;
+              state.recycleStep = null;
+              state.lastProductData = null;
+              switchTab('home');
+              const status = document.getElementById('status');
+              if (status) status.textContent = 'Ready to scan';
+              updateScanSteps();
+            };
+          }
+        } else {
+          console.log('Recyclability is null/undefined, hiding element');
+          recyclabilityEl.style.display = 'none';
+        }
+      } else {
+        console.log('Recyclability not available, hiding element');
+        if (recyclabilityEl) {
+          recyclabilityEl.style.display = 'none';
+        }
+      }
+      
       // Set image
       if (img) {
         if (data && data.image) {
@@ -818,15 +876,34 @@
         modal.classList.add('show');
       }
     }
-    function closeProductModal() {
-      state.pendingBarcode = null;
-      document.getElementById('productConfirmModal').classList.remove('show');
-    }
     async function confirmProductYes() {
       if (!state.pendingBarcode) {
         closeProductModal();
         return;
       }
+      
+      // Check if product is recyclable - get the data from the modal
+      const productData = state.lastProductData || {};
+      if (productData.recyclable === false) {
+        // Product is not recyclable - cancel and go back to home
+        alert('This item is not recyclable. Please dispose of it in regular trash.');
+        closeProductModal();
+        state.pendingBarcode = null;
+        state.recycleSession = null;
+        state.recycleStep = null;
+        state.lastProductData = null;
+        
+        // Go back to home page
+        switchTab('home');
+        const status = document.getElementById('status');
+        if (status) status.textContent = 'Ready to scan';
+        updateScanSteps();
+        return;
+      }
+      
+      // If recyclability is unknown (null), still allow them to proceed (might be checking)
+      // Only block if explicitly false
+      
       const email = authState.user?.email || 'demo@clear.cycle';
       try {
         // Start recycle session
@@ -847,9 +924,9 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ barcode: state.pendingBarcode })
         });
-        const productData = await productRes.json();
+        const productResData = await productRes.json();
         if (!productRes.ok) {
-          throw new Error(productData.error || 'Failed to submit product');
+          throw new Error(productResData.error || 'Failed to submit product');
         }
         closeProductModal();
         const status = document.getElementById('status');
@@ -864,9 +941,21 @@
       state.pendingBarcode = null;
       state.recycleSession = null;
       state.recycleStep = null;
+      state.lastProductData = null;
       const status = document.getElementById('status');
       if (status) status.textContent = 'Ready to scan';
       closeProductModal();
+    }
+    
+    function closeProductModal() {
+      state.pendingBarcode = null;
+      // Reset Yes button to default behavior
+      const yesBtn = document.getElementById('productModalYes');
+      if (yesBtn) {
+        yesBtn.textContent = 'Yes';
+        yesBtn.onclick = confirmProductYes;
+      }
+      document.getElementById('productConfirmModal').classList.remove('show');
     }
     function updateScanSteps() {
       const step1 = document.getElementById('step1');
@@ -1005,6 +1094,11 @@
               })
               .then(data => {
                 console.log('Product API response:', JSON.stringify(data, null, 2));
+                console.log('Recyclability data:', {
+                  recyclable: data.recyclable,
+                  message: data.recyclabilityMessage,
+                  confidence: data.recyclabilityConfidence
+                });
                 // Always show the modal - even if product not found, user can still proceed
                 if (data && data.found !== false && data.name && data.name.trim() && data.name !== 'Unknown') {
                   // Product found with valid name - show it
@@ -1012,9 +1106,12 @@
                     name: data.name.trim(),
                     brand: (data.brand && data.brand.trim()) || 'Unknown',
                     category: (data.category && data.category.trim()) || 'Unknown',
-                    image: data.image || null
+                    image: data.image || null,
+                    recyclable: data.recyclable !== undefined ? data.recyclable : null,
+                    recyclabilityMessage: data.recyclabilityMessage || null,
+                    recyclabilityConfidence: data.recyclabilityConfidence || 0
                   };
-                  console.log('Showing product with name:', productData.name);
+                  console.log('Showing product with name:', productData.name, 'recyclable:', productData.recyclable);
                   showProductModal(productData, barcode);
                   if (status) status.textContent = 'Confirm product to continue';
                 } else if (data && data.found === true && data.name) {
@@ -1026,9 +1123,12 @@
                     name: productName,
                     brand: (data.brand && data.brand.trim()) || 'Unknown',
                     category: (data.category && data.category.trim()) || 'Unknown',
-                    image: data.image || null
+                    image: data.image || null,
+                    recyclable: data.recyclable !== undefined ? data.recyclable : null,
+                    recyclabilityMessage: data.recyclabilityMessage || null,
+                    recyclabilityConfidence: data.recyclabilityConfidence || 0
                   };
-                  console.log('Showing product (fallback name):', productData.name);
+                  console.log('Showing product (fallback name):', productData.name, 'recyclable:', productData.recyclable);
                   showProductModal(productData, barcode);
                   if (status) status.textContent = 'Confirm product to continue';
                 } else {
@@ -1038,7 +1138,10 @@
                     name: `Product (Barcode: ${barcode})`,
                     brand: 'Unknown',
                     category: 'Unknown',
-                    image: null
+                    image: null,
+                    recyclable: null,
+                    recyclabilityMessage: null,
+                    recyclabilityConfidence: 0
                   }, barcode);
                   if (status) status.textContent = 'Product not found. Confirm to continue.';
                 }
@@ -1051,7 +1154,10 @@
                   name: `Product (Barcode: ${barcode})`,
                   brand: 'Unknown',
                   category: 'Unknown',
-                  image: null
+                  image: null,
+                  recyclable: null,
+                  recyclabilityMessage: null,
+                  recyclabilityConfidence: 0
                 }, barcode);
                 if (status) status.textContent = 'Product details unavailable. Confirm to continue.';
               });
@@ -1345,41 +1451,82 @@
         // Wait for video to be ready to play
         const extractFrames = async () => {
           try {
+            // Wait a bit for video to fully load
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
             // Play the video to ensure it's ready
-            await video.play();
-            // Pause immediately
-            video.pause();
+            try {
+              await video.play();
+              // Pause immediately
+              video.pause();
+            } catch (playErr) {
+              console.warn('Video play failed, continuing anyway:', playErr);
+            }
+            
+            // Wait a bit more for video to be ready
+            await new Promise(resolve => setTimeout(resolve, 300));
             
             const width = video.videoWidth;
             const height = video.videoHeight;
-            const duration = video.duration;
+            let duration = video.duration;
             
-            console.log(`Video ready: ${width}x${height}, duration: ${duration}s`);
+            console.log(`Video properties: ${width}x${height}, duration: ${duration}s`);
             
-            if (!width || !height || width === 0 || height === 0) {
+            // Validate dimensions
+            if (!width || !height || width === 0 || height === 0 || isNaN(width) || isNaN(height)) {
               rejectOnce(new Error('Video has invalid dimensions'));
               return;
             }
             
-            if (!duration || isNaN(duration) || duration <= 0) {
-              rejectOnce(new Error('Video has invalid duration'));
-              return;
+            // Validate duration - if invalid, use a default or try to get it another way
+            if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
+              console.warn('Video duration invalid, trying to get from metadata');
+              // Try waiting a bit more
+              await new Promise(resolve => setTimeout(resolve, 500));
+              duration = video.duration;
+              
+              // If still invalid, use a default duration (5 seconds for our recording)
+              if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
+                console.warn('Using default duration of 5 seconds');
+                duration = 5.0;
+              }
             }
+            
+            // Ensure duration is finite and positive
+            duration = Math.max(0.5, Math.min(duration, 30)); // Clamp between 0.5s and 30s
+            
+            console.log(`Using duration: ${duration}s`);
             
             canvas.width = width;
             canvas.height = height;
             
             // Extract frames at different points in the video
+            // Ensure times are valid numbers
             const times = [
-              duration * 0.2,  // 20% through
-              duration * 0.5,  // 50% through
-              duration * 0.8   // 80% through
-            ];
+              Math.max(0.1, Math.min(duration * 0.2, duration - 0.1)),  // 20% through
+              Math.max(0.1, Math.min(duration * 0.5, duration - 0.1)),  // 50% through
+              Math.max(0.1, Math.min(duration * 0.8, duration - 0.1))   // 80% through
+            ].filter(t => isFinite(t) && t > 0 && t < duration);
+            
+            if (times.length === 0) {
+              // Fallback: try to get frame at 0.5 seconds
+              times.push(Math.min(0.5, duration - 0.1));
+            }
+            
+            console.log(`Extracting frames at times: ${times.join(', ')}s`);
             
             let extracted = 0;
             
             const extractFrameAtTime = (time) => {
               return new Promise((frameResolve) => {
+                // Validate time before using it
+                if (!isFinite(time) || time < 0 || time >= duration) {
+                  console.warn(`Invalid time ${time}, skipping`);
+                  extracted++;
+                  frameResolve();
+                  return;
+                }
+                
                 const seekHandler = () => {
                   video.removeEventListener('seeked', seekHandler);
                   try {
@@ -1402,8 +1549,26 @@
                   }
                 };
                 
+                const errorHandler = () => {
+                  video.removeEventListener('seeked', seekHandler);
+                  video.removeEventListener('error', errorHandler);
+                  console.warn(`Failed to seek to ${time}s`);
+                  extracted++;
+                  frameResolve();
+                };
+                
                 video.addEventListener('seeked', seekHandler, { once: true });
-                video.currentTime = Math.max(0.1, Math.min(time, duration - 0.1));
+                video.addEventListener('error', errorHandler, { once: true });
+                
+                // Set currentTime with validation
+                const safeTime = Math.max(0.1, Math.min(time, duration - 0.1));
+                if (isFinite(safeTime) && safeTime > 0) {
+                  video.currentTime = safeTime;
+                } else {
+                  console.warn(`Invalid time calculated: ${safeTime}, skipping`);
+                  extracted++;
+                  frameResolve();
+                }
               });
             };
             
@@ -1412,11 +1577,28 @@
               await extractFrameAtTime(time);
             }
             
+            // If we didn't get enough frames, try getting a frame at the start
+            if (frames.length === 0) {
+              console.log('No frames extracted, trying frame at start');
+              video.currentTime = 0.1;
+              await new Promise(resolve => setTimeout(resolve, 500));
+              try {
+                ctx.drawImage(video, 0, 0, width, height);
+                const frameData = canvas.toDataURL('image/jpeg', 0.85);
+                if (frameData && frameData.length > 5000) {
+                  frames.push(frameData);
+                  console.log('Got frame at start');
+                }
+              } catch (e) {
+                console.error('Error getting frame at start:', e);
+              }
+            }
+            
             if (frames.length > 0) {
               console.log(`Successfully extracted ${frames.length} frames`);
               resolveOnce(frames);
             } else {
-              rejectOnce(new Error('No valid frames extracted'));
+              rejectOnce(new Error('No valid frames extracted from video'));
             }
           } catch (err) {
             console.error('Error in extractFrames:', err);
