@@ -864,13 +864,36 @@
     async function recordVideo() {
       const rec = new MediaRecorder(state.stream);
       const chunks = [];
+      const frames = [];
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const maxWidth = 512;
+      const delays = [300, 1000, 1700];
+
+      function captureFrame() {
+        if (!video.videoWidth || !video.videoHeight) return;
+        const scale = Math.min(1, maxWidth / video.videoWidth);
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        frames.push(canvas.toDataURL('image/jpeg', 0.7));
+      }
+
       rec.ondataavailable = e => chunks.push(e.data);
       rec.start();
+      const capturePromises = delays.map((delay) => new Promise((resolve) => {
+        setTimeout(() => {
+          captureFrame();
+          resolve();
+        }, delay);
+      }));
       await new Promise(r => setTimeout(r, 2000));
       rec.stop();
-      return new Promise(r => {
-        rec.onstop = () => r(new Blob(chunks));
+      await Promise.all(capturePromises);
+      const blob = await new Promise(r => {
+        rec.onstop = () => r(new Blob(chunks, { type: 'video/webm' }));
       });
+      return { blob, frames };
     }
 
     async function startScan() {
@@ -1031,8 +1054,11 @@
           scanBtn.disabled = true;
           
           let blob;
+          let frames;
           try {
-            blob = await recordVideo();
+            const recorded = await recordVideo();
+            blob = recorded.blob;
+            frames = recorded.frames;
           } catch (e) {
             console.error('[VIDEO] Recording failed:', e);
             showError('Recording failed: ' + e.message);
@@ -1046,7 +1072,7 @@
           status.textContent = 'Uploading...';
           const fd = new FormData();
           fd.append('video', blob, `${Date.now()}.webm`);
-          fd.append('frames', '[]');
+          fd.append('frames', JSON.stringify(frames || []));
           const res = await fetch(`${API}/api/recycle/session/${state.sessionId}/video`, {
             method: 'POST',
             body: fd,

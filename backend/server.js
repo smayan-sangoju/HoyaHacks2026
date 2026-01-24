@@ -17,7 +17,7 @@ app.use(cors())
 app.use(express.json())
 
 const PORT = process.env.PORT || 4000
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/clearcycle'
+const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://hoyahacks:Tamannah_Sreeleela5541@cycleanna.ksqdvhw.mongodb.net/clearcycle?retryWrites=true&w=majority&appName=CycleAnna'
 
 if (USE_MOCK) {
   // Use in-memory mock models when USE_MOCK_DB=true
@@ -234,7 +234,7 @@ function extractJsonObject(text) {
   return null
 }
 
-async function verifyFramesWithOpenRouter({ frames }) {
+async function verifyFramesWithOpenRouter({ frames, product }) {
   const key = process.env.OPENROUTER_API_KEY
   if (!key) {
     return {
@@ -244,22 +244,36 @@ async function verifyFramesWithOpenRouter({ frames }) {
     }
   }
 
-  const model = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'
+  const model = process.env.OPENROUTER_MODEL || 'google/gemini-1.5-flash'
   const siteUrl = process.env.OPENROUTER_SITE_URL || 'http://localhost'
   const title = process.env.OPENROUTER_APP_TITLE || 'ClearCycle'
+  const minConfidence = Number(process.env.OPENROUTER_MIN_CONFIDENCE || 0.65)
+  const productName = product?.name ? String(product.name) : ''
+  const productBrand = product?.brand ? String(product.brand) : ''
+  const productCategory = product?.category ? String(product.category) : ''
+  const productBarcode = product?.barcode ? String(product.barcode) : ''
+  const hasProductContext = Boolean(productName || productBrand || productCategory || productBarcode)
+  const requireMatch = Boolean(productName || productBrand || productCategory)
 
   const system = [
     'You are a recycling verification system for a hackathon demo.',
     'You will receive 2-3 camera frames from a short verification video.',
     'Return ONLY strict JSON (no markdown, no extra text).',
-    'Required keys: bin_visible (boolean), bottle_visible (boolean), disposal_action (boolean), confidence (number 0..1), notes (string).',
-    'Also include pass (boolean) where pass=true only if all 3 booleans are true and confidence >= 0.65.'
+    'Required keys: bin_visible (boolean), item_visible (boolean), disposal_action (boolean), matches_product (boolean), confidence (number 0..1), notes (string).'
   ].join('\n')
+
+  const productSummary = hasProductContext
+    ? `Expected item from barcode:\n- barcode: ${productBarcode || 'unknown'}\n- name: ${productName || 'unknown'}\n- brand: ${productBrand || 'unknown'}\n- category: ${productCategory || 'unknown'}`
+    : 'Expected item from barcode: unknown (no product context available).'
 
   const userContent = [
     {
       type: 'text',
-      text: 'Check if a recycling bin is visible, a bottle/container is visible, and the disposal action is happening (bottle entering bin).'
+      text: [
+        productSummary,
+        'Task: confirm a trash/recycling bin is visible, the item is visible, and the disposal action is happening (item entering bin).',
+        'If the expected item is known, set matches_product=true only if the item in the frames appears consistent with that product.'
+      ].join('\n')
     },
     ...frames.map((url) => ({ type: 'image_url', image_url: { url } }))
   ]
@@ -302,8 +316,27 @@ async function verifyFramesWithOpenRouter({ frames }) {
   }
 
   const confidence = Number(obj.confidence || 0)
-  const verified = Boolean(obj.pass === true)
-  return { verified, confidence, verdict: obj }
+  const binVisible = Boolean(obj.bin_visible)
+  const itemVisible = Boolean(obj.item_visible)
+  const actionVisible = Boolean(obj.disposal_action)
+  const matchesProduct = Boolean(obj.matches_product)
+  const verified = Boolean(
+    binVisible &&
+    itemVisible &&
+    actionVisible &&
+    (requireMatch ? matchesProduct : true) &&
+    confidence >= minConfidence
+  )
+
+  return {
+    verified,
+    confidence,
+    verdict: {
+      ...obj,
+      min_confidence: minConfidence,
+      require_match: requireMatch
+    }
+  }
 }
 
 // Points mapping (configurable)
@@ -523,7 +556,12 @@ app.post('/api/recycle/session/:sessionId/video', recycleRateLimit, videoUpload.
     }
 
     const frames = parseDataUrlImages(req.body.frames)
-    const { verified, confidence, verdict } = await verifyFramesWithOpenRouter({ frames })
+    let product = null
+    try {
+      product = await Product.findOne({ barcode: s.productBarcode })
+    } catch {}
+    const productForAi = product || { barcode: s.productBarcode }
+    const { verified, confidence, verdict } = await verifyFramesWithOpenRouter({ frames, product: productForAi })
 
     // Store (local) URL by default; optionally upload to S3-compatible object storage (Cloudflare R2, Supabase, etc.)
     let videoUrl = `/uploads/${path.basename(req.file.path)}`
