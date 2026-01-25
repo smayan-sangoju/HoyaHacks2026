@@ -1,85 +1,143 @@
-# ClearCycle - Scan & Redeem (Hackathon Demo)
+# ClearCycle
 
-This repository contains a full-stack hackathon project: ClearCycle - Scan & Redeem.
-Students scan items they throw away and earn dining credits if the disposal is verified.
+ClearCycle is a full-stack sustainability application built at **HoyaHacks 2026** that incentivizes proper waste disposal through verification and rewards. Users scan a product barcode, scan a trash can QR code, and record a short video of disposal. Once verified, the system awards points that can be redeemed for rewards.
 
-This demo includes:
+The project focuses on accountability, accessibility, and scalability in recycling infrastructure.
 
-- Backend: Node.js + Express + MongoDB (Mongoose)
-- Frontend: Vanilla JS + ZXing barcode scanning
-- **Near-perfect barcode recognition system**: DB → OpenFoodFacts → General Barcode API → Manual Add (with confidence scoring)
-- Fake AI verification (80% pass rate) and anti-fraud duplicate detection (video hash)
-- Mobile-first **live camera** flow: **product barcode → product verification → bin barcode → 2s video** with server-enforced ordering + optional OpenRouter vision verification
-- Product caching: Barcode lookups saved to MongoDB for instant repeat scans
+---
 
-Quick start (requires Node 18+ and a running MongoDB at `mongodb://localhost:27017`):
+## Project Goals
 
-1. Backend
-   cd backend
-   npm install
-   cp .env.example .env # edit MONGO_URI if needed
-   node server.js
+- Encourage correct disposal of recyclable items  
+- Provide verifiable proof of disposal  
+- Create a scalable system for public recycling programs  
+- Reduce contamination in recycling streams  
 
-2. Frontend
-   cd public
-   npm install
-   node server.js
+---
 
+## Features
+
+- Product barcode scanning and identification  
+- QR-coded trash can system  
+- Short video capture for disposal verification  
+- AI-assisted video validation workflow  
+- User points and reward tracking  
+- Admin dashboard for trash can creation and QR code downloads  
+- MongoDB-backed data storage  
+
+---
+
+## Tech Stack
+
+### Frontend
+- HTML
+- Tailwind CSS
+- Vanilla JavaScript
+- ZXing (barcode scanning)
+- Device camera access
+
+### Backend
+- Node.js
+- Express.js
+- MongoDB with Mongoose
+- Multer (video uploads)
+
+### APIs / Services
+- OpenFoodFacts API (primary product lookup)
+- Fallback barcode search API
+- Optional Gemini / OpenRouter vision models
+
+---
+
+## Application Flow
+
+1. User scans a product barcode  
+2. Product information is retrieved and cached  
+3. User scans a trash can QR code  
+4. User records a short disposal video  
+5. Backend validates the sequence and stores the event  
+6. Points are awarded upon successful verification  
+
+---
+
+## Local Setup
+
+### Requirements
+- Node.js 18+
+- MongoDB (local or Atlas)
+- Modern browser with camera access
+
+### Backend Setup
+```bash
+cd backend
+npm install
+cp .env.example .env
+# Add your MongoDB URI and API keys
+node server.js
+```
+
+### Frontend Setup
+```bash
+cd public
+npm install
+node server.js
+```
 Open http://127.0.0.1:3000 in your browser.
 
-Notes:
+### Environment Variables
+Create a backend/.env file with the following:
+```bash
+MONGO_URI=mongodb://localhost:27017/clearcycle
+OPENROUTER_API_KEY=your_key_here
+OPENROUTER_MODEL=optional_model_name
+```
+Vision model keys are only required if AI verification is enabled.
 
-- The backend will auto-create a demo user (demo@clear.cycle) on startup.
-- Videos are stored in `backend/uploads` and served statically.
-- Product lookups are cached in the `products` MongoDB collection.
+## API Endpoints
 
-## Product Recognition Cascade (Near-Perfect Barcode Matching)
+### Products
+- `GET /api/product?barcode=`  
+  Retrieves product info and caches it in the database.
 
-When you scan a barcode, the system uses a smart cascade to identify products:
+- `POST /api/product`  
+  Manually adds or updates a product.
 
-1. **Local Cache First** — Check MongoDB `products` collection
-2. **OpenFoodFacts** — If not found, query OpenFoodFacts API (best for groceries)
-3. **General Barcode API** — Fallback to general UPC database (configurable)
-4. **Manual Add** — If still not found, user can manually add the product
+---
 
-Each product is scored by confidence:
-- **High** — product name + image available
-- **Medium** — only product name
-- **Low** — missing name or very short name
+### Recycling Sessions
+- `POST /api/recycle/session/start`  
+  Starts a recycling session.
 
-**Frontend Flow:**
-- If found with high confidence → instant confirmation
-- If found with medium/low confidence → user can verify yes/no or edit
-- If not found → manual form to add product
+- `POST /api/recycle/session/:id/product`  
+  Attaches a product to a session.
 
-**Backend Endpoints:**
+- `POST /api/recycle/session/:id/bin`  
+  Attaches a trash can to a session.
 
-- `GET /api/product?barcode=...` — Lookup with cascade + caching
-- `POST /api/product` — Manual product add/update
+- `POST /api/recycle/session/:id/video`  
+  Uploads the disposal video.
 
-## Live camera recycle flow (judges)
+---
 
-Flow:
+## Database Collections
 
-Scan product barcode → verify product (or add manually) → scan bin barcode → record 2-second video → server verifies order + (optional) OpenRouter vision → points awarded.
+- `users` — user profiles and point totals  
+- `products` — cached barcode-product mappings  
+- `recycleEvents` — verified disposal events  
 
-Backend endpoints:
+---
 
-- `POST /api/recycle/session/start` `{ email }`
-- `POST /api/recycle/session/:sessionId/product` `{ barcode }`
-- `POST /api/recycle/session/:sessionId/bin` `{ barcode }`
-- `POST /api/recycle/session/:sessionId/video` `multipart/form-data` with:
-  - `video`: the recorded clip
-  - `frames`: JSON string array of 2–3 `data:image/jpeg;base64,...` frame URLs
+## Security Notes
 
-Environment:
+- `.env` files are excluded via `.gitignore`  
+- API keys are never committed to version control  
+- Each developer must supply their own environment variables  
 
-- Set `OPENROUTER_API_KEY` (and optionally `OPENROUTER_MODEL`) in `backend/.env` to enable vision verification.
-- For object storage (Cloudflare R2 / S3-compatible), see `backend/.env.example` (`S3_*` vars). If unset, videos are served from `backend/uploads`.
+---
 
-## MongoDB Collections
+## Limitations and Future Work
 
-- `users` — User profiles with points
-- `disposalEvents` — Legacy image uploads (not used in new flow)
-- `recycleEvents` — Video-based recycling events with AI verification
-- `products` — Cached barcode → product mappings with confidence scoring
+- Improve vision model accuracy and confidence scoring  
+- Add real-time reward redemption partnerships  
+- Expand admin analytics and reporting  
+- Support multi-material disposal detection  
