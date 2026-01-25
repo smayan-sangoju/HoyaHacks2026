@@ -774,8 +774,21 @@
   </div>
 
   <script>
-    // Same origin: app and API on same server (single-server mode for phone support)
-    const API = '';
+    // API base resolver:
+    // - ?api=https://your-backend.com (query override)
+    // - window.__API_BASE__ (manual override)
+    // - localhost/127.0.0.1 -> default to http://localhost:4000
+    // - otherwise same-origin
+    function resolveApiBase() {
+      const params = new URLSearchParams(window.location.search);
+      const paramBase = params.get('api');
+      if (paramBase) return paramBase.replace(/\/$/, '');
+      if (window.__API_BASE__) return String(window.__API_BASE__).replace(/\/$/, '');
+      const host = window.location.hostname;
+      if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:4000';
+      return '';
+    }
+    const API = resolveApiBase();
     const authState = { user: null, token: null };
     async function safeJson(res) {
       const text = await res.text();
