@@ -1,0 +1,9 @@
+{
+  "name": "clearcycle",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "./start.sh",
+    "start-https": "./start-https.sh"
+  }
+}

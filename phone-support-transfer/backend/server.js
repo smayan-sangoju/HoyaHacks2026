@@ -1,4 +1,11 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+if (process.env.OPENROUTER_API_KEY) {
+  console.log('OpenRouter API key: configured');
+} else if (process.env.GEMINI_API_KEY) {
+  console.log('Gemini API key: configured');
+} else {
+  console.warn('No vision API key (OPENROUTER_API_KEY or GEMINI_API_KEY) — verification will fail');
+}
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -40,10 +47,10 @@ if (USE_MOCK) {
   const mongoose = require('mongoose')
   ;(async () => {
     try {
-      await mongoose.connect(MONGO_URI)
+      await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 5000 })
       console.log('Connected to MongoDB')
     } catch (err) {
-      console.error('MongoDB connection error', err)
+      console.warn('MongoDB not connected (app still runs):', err.message)
     }
   })()
   User = require('./models/User')
@@ -79,7 +86,8 @@ async function ensureDemoUser() {
   const name = process.env.DEMO_USER_NAME || 'Demo Student'
   let user = await User.findOne({ email })
   if (!user) {
-    user = await User.create({ name, email, diningCredits: 0 })
+    const hashed = await bcrypt.hash('Demo123!', 10)
+    user = await User.create({ name, email, password: hashed, points: 0 })
     console.log('Created demo user:', email)
   }
 }
@@ -135,12 +143,18 @@ function normalizeBaseUrl(url) {
 }
 
 function s3IsConfigured() {
+  const ep = process.env.S3_ENDPOINT || ''
+  const key = process.env.S3_ACCESS_KEY_ID || ''
+  const secret = process.env.S3_SECRET_ACCESS_KEY || ''
+  const pub = process.env.S3_PUBLIC_BASE_URL || ''
+  // Reject placeholder .env values (e.g. ... or <accountid>) so we use local uploads
+  const looksPlaceholder = (s) => !s || s === '...' || /<[^>]+>/.test(s)
   return Boolean(
     process.env.S3_BUCKET &&
-    process.env.S3_ENDPOINT &&
-    process.env.S3_ACCESS_KEY_ID &&
-    process.env.S3_SECRET_ACCESS_KEY &&
-    process.env.S3_PUBLIC_BASE_URL
+    ep && !looksPlaceholder(ep) &&
+    key && !looksPlaceholder(key) &&
+    secret && !looksPlaceholder(secret) &&
+    pub && !looksPlaceholder(pub)
   )
 }
 
@@ -511,31 +525,8 @@ const POINTS_MAP = {
   other: 15
 }
 
-// Phone support: serve frontend when USE_HTTPS=1 or SERVE_FRONTEND=1
 const SERVE_FRONTEND = process.env.SERVE_FRONTEND === '1' || process.env.USE_HTTPS === '1'
 const PUBLIC_DIR = path.join(__dirname, '..', 'public')
-
-// --- HEALTH CHECK ---
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), backend: 'running' })
-})
-
-// Phone / LAN access: return URL to open app on phone (same Wi‑Fi)
-function getLanIp() {
-  const nets = os.networkInterfaces()
-  for (const name of Object.keys(nets)) {
-    for (const n of nets[name]) {
-      if (n.family === 'IPv4' && !n.internal) return n.address
-    }
-  }
-  return null
-}
-app.get('/api/network', (req, res) => {
-  const ip = getLanIp()
-  const port = process.env.FRONTEND_PORT || '3000'
-  const protocol = process.env.USE_HTTPS === '1' ? 'https' : 'http'
-  res.json({ phoneUrl: ip ? `${protocol}://${ip}:${port}` : null })
-})
 
 app.get('/', (req, res) => {
   if (SERVE_FRONTEND) return res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
@@ -775,15 +766,24 @@ app.post('/api/recycle/session/start', recycleRateLimit, async (req, res) => {
     const { email } = req.body || {}
     if (!email) return res.status(400).json({ error: 'Missing email' })
 
-    // Ensure user exists
-    let user = await User.findOne({ email })
-    if (!user) user = await User.create({ name: email.split('@')[0], email, points: 0 })
+    let userId = null
+    try {
+      let user = await User.findOne({ email })
+      if (!user) {
+        const hashed = await bcrypt.hash('Demo123!', 10)
+        user = await User.create({ name: email.split('@')[0], email, password: hashed, points: 0 })
+      }
+      userId = user._id
+    } catch (mongoErr) {
+      console.warn('MongoDB unavailable for session start, using offline user:', mongoErr.message)
+      userId = 'offline-demo'
+    }
 
     const sessionId = newSessionId()
     recycleSessions.set(sessionId, {
       sessionId,
       email,
-      userId: user._id,
+      userId,
       step: 'product',
       createdAt: Date.now(),
       productBarcode: null,
@@ -856,22 +856,23 @@ app.post('/api/recycle/session/:sessionId/video', recycleRateLimit, videoUpload.
     if (s.step !== 'video') return res.status(409).json({ error: `Invalid step. Expected video, got ${s.step}` })
     if (!req.file) return res.status(400).json({ error: 'Missing video file' })
 
-    // Cooldowns (user + bin) enforced on server
-    const lastUser = await RecycleEvent.findOne({ userId: s.userId, verified: true }).sort({ timestamp: -1 })
-    if (lastUser && Date.now() - new Date(lastUser.timestamp).getTime() < USER_COOLDOWN_MS) {
-      return res.status(429).json({ error: 'Cooldown: user is cooling down' })
-    }
-    const lastBin = await RecycleEvent.findOne({ binBarcode: s.binBarcode, verified: true }).sort({ timestamp: -1 })
-    if (lastBin && Date.now() - new Date(lastBin.timestamp).getTime() < BIN_COOLDOWN_MS) {
-      return res.status(429).json({ error: 'Cooldown: bin is cooling down' })
-    }
-
-    // Duplicate video prevention
     const buffer = fs.readFileSync(req.file.path)
     const videoHash = sha256(buffer)
-    const dup = await RecycleEvent.findOne({ videoHash })
-    if (dup) {
-      return res.status(409).json({ error: 'Duplicate video detected', duplicate: true })
+    let mongoOk = true
+    try {
+      const lastUser = await RecycleEvent.findOne({ userId: s.userId, verified: true }).sort({ timestamp: -1 })
+      if (lastUser && Date.now() - new Date(lastUser.timestamp).getTime() < USER_COOLDOWN_MS) {
+        return res.status(429).json({ error: 'Cooldown: user is cooling down' })
+      }
+      const lastBin = await RecycleEvent.findOne({ binBarcode: s.binBarcode, verified: true }).sort({ timestamp: -1 })
+      if (lastBin && Date.now() - new Date(lastBin.timestamp).getTime() < BIN_COOLDOWN_MS) {
+        return res.status(429).json({ error: 'Cooldown: bin is cooling down' })
+      }
+      const dup = await RecycleEvent.findOne({ videoHash })
+      if (dup) return res.status(409).json({ error: 'Duplicate video detected', duplicate: true })
+    } catch (mongoErr) {
+      console.warn('MongoDB unavailable for cooldown/dup check, continuing:', mongoErr.message)
+      mongoOk = false
     }
 
     const frames = parseDataUrlImages(req.body.frames)
@@ -921,37 +922,48 @@ app.post('/api/recycle/session/:sessionId/video', recycleRateLimit, videoUpload.
     // Store (local) URL by default; optionally upload to S3-compatible object storage (Cloudflare R2, Supabase, etc.)
     let videoUrl = `/uploads/${path.basename(req.file.path)}`
     if (s3IsConfigured()) {
-      const keyPrefix = (process.env.S3_KEY_PREFIX || 'clearcycle').replace(/^\/+|\/+$/g, '')
-      const key = `${keyPrefix}/videos/${path.basename(req.file.path)}`
-      const uploaded = await uploadFileToS3IfConfigured({ filePath: req.file.path, contentType: req.file.mimetype, key })
-      if (uploaded) {
-        videoUrl = uploaded
-        try { fs.unlinkSync(req.file.path) } catch {}
+      try {
+        const keyPrefix = (process.env.S3_KEY_PREFIX || 'clearcycle').replace(/^\/+|\/+$/g, '')
+        const key = `${keyPrefix}/videos/${path.basename(req.file.path)}`
+        const uploaded = await uploadFileToS3IfConfigured({ filePath: req.file.path, contentType: req.file.mimetype, key })
+        if (uploaded) {
+          videoUrl = uploaded
+          try { fs.unlinkSync(req.file.path) } catch {}
+        }
+      } catch (s3Err) {
+        console.warn('S3 upload failed, using local storage:', s3Err.message)
+        // videoUrl stays as /uploads/...
       }
     }
 
     const pointsAwarded = verified ? RECYCLE_POINTS : 0
-    const event = await RecycleEvent.create({
-      userId: s.userId,
-      productBarcode: s.productBarcode,
-      binBarcode: s.binBarcode,
-      videoUrl,
-      videoHash,
-      verified,
-      aiConfidence: confidence,
-      aiVerdict: verdict,
-      pointsAwarded
-    })
-
-    if (verified) {
-      const user = await User.findOne({ _id: s.userId })
-      if (user) {
-        user.points = (user.points || 0) + pointsAwarded
-        await user.save()
+    let event = null
+    if (mongoOk) {
+      try {
+        event = await RecycleEvent.create({
+          userId: s.userId,
+          productBarcode: s.productBarcode,
+          binBarcode: s.binBarcode,
+          videoUrl,
+          videoHash,
+          verified,
+          aiConfidence: confidence,
+          aiVerdict: verdict,
+          pointsAwarded
+        })
+        if (verified && s.userId !== 'offline-demo') {
+          const user = await User.findOne({ _id: s.userId })
+          if (user) {
+            user.points = (user.points || 0) + pointsAwarded
+            await user.save()
+          }
+        }
+      } catch (mongoErr) {
+        console.warn('MongoDB unavailable for saving recycle event:', mongoErr.message)
+        mongoOk = false
       }
     }
 
-    // End session after upload attempt (pass or fail)
     recycleSessions.delete(sessionId)
 
     console.log(`Video verification complete for session ${sessionId}: verified=${verified}, points=${pointsAwarded}, confidence=${confidence}`)
@@ -964,7 +976,6 @@ app.post('/api/recycle/session/:sessionId/video', recycleRateLimit, videoUpload.
       notes: verdict?.notes
     })
 
-    // Always return a response - never hang
     return res.json({
       ok: true,
       verified: Boolean(verified),
@@ -979,7 +990,8 @@ app.post('/api/recycle/session/:sessionId/video', recycleRateLimit, videoUpload.
         item_enters_bin: false
       },
       videoUrl,
-      recycleEvent: event
+      recycleEvent: event,
+      ...(mongoOk ? {} : { mongoUnavailable: true })
     })
   } catch (err) {
     console.error(err)
@@ -1005,12 +1017,24 @@ app.get('/api/history/:email', async (req, res) => {
   res.json({ events })
 })
 
-// Health
+// Health (includes MongoDB and verification status)
 app.get('/api/health', (req, res) => {
   const hasOpenRouter = !!process.env.OPENROUTER_API_KEY
   const hasGemini = !!process.env.GEMINI_API_KEY
-  res.json({ 
-    ok: true, 
+  let mongo = 'mock'
+  if (process.env.USE_MOCK_DB !== 'true') {
+    try {
+      const mongoose = require('mongoose')
+      mongo = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+    } catch (e) {
+      mongo = 'error'
+    }
+  }
+  res.json({
+    ok: true,
+    timestamp: new Date().toISOString(),
+    backend: 'running',
+    mongo,
     verification: {
       openRouter: hasOpenRouter,
       gemini: hasGemini,
@@ -1018,6 +1042,23 @@ app.get('/api/health', (req, res) => {
       configured: hasOpenRouter || hasGemini
     }
   })
+})
+
+// Phone / LAN access: return URL to open app on phone (same Wi‑Fi)
+function getLanIp() {
+  const nets = os.networkInterfaces()
+  for (const name of Object.keys(nets)) {
+    for (const n of nets[name]) {
+      if (n.family === 'IPv4' && !n.internal) return n.address
+    }
+  }
+  return null
+}
+app.get('/api/network', (req, res) => {
+  const ip = getLanIp()
+  const port = process.env.FRONTEND_PORT || '3000'
+  const protocol = process.env.USE_HTTPS === '1' ? 'https' : 'http'
+  res.json({ phoneUrl: ip ? `${protocol}://${ip}:${port}` : null })
 })
 
 // Placeholder for Solana logging (optional)
@@ -1035,17 +1076,39 @@ function computeConfidence(name, image) {
   return 'medium'
 }
 
-// Helper: call a general barcode API (placeholder for UPC database)
+// Helper: call UPCItemDB trial API (no key, 100/day) or optional BARCODE_API_KEY provider
 async function lookupGeneralBarcode(barcode) {
-  const apiKey = process.env.BARCODE_API_KEY
-  if (!apiKey) return null
+  const trimmed = String(barcode).trim()
+  if (!trimmed) return null
 
+  // UPCItemDB trial: no key, 100 req/day. Param "upc" accepts UPC (12) or EAN (13).
   try {
-    // Placeholder: swap provider endpoint as needed (e.g., barcodelookup.com, upcitemdb.com, etc.)
-    // For now, return null to signal "not implemented"
-    return null
+    const url = `https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(trimmed)}`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'ClearCycle/1.0 (https://clearcycle.app)' }
+    })
+    clearTimeout(timeoutId)
+    if (!res.ok) {
+      if (res.status === 404) return null
+      console.log(`UPCItemDB lookup ${res.status} for barcode ${trimmed}`)
+      return null
+    }
+    const data = await res.json()
+    const item = data.items && data.items[0]
+    if (!item || !item.title) return null
+    const name = (item.title || '').trim() || null
+    const brand = (item.brand || '').trim() || ''
+    const category = (item.category || '').trim() || ''
+    const image = Array.isArray(item.images) && item.images[0] ? item.images[0] : null
+    if (!name) return null
+    console.log(`UPCItemDB found: ${name} (${brand}) for barcode ${trimmed}`)
+    return { name, brand, category, image }
   } catch (err) {
-    console.error('General barcode API error:', err)
+    if (err.name === 'AbortError') console.error(`UPCItemDB timeout for barcode ${trimmed}`)
+    else console.error('UPCItemDB lookup error:', err.message)
     return null
   }
 }
@@ -1142,8 +1205,12 @@ app.get('/api/product', async (req, res) => {
   }
 
   try {
-    // 1. Check local database first
-    let product = await Product.findOne({ barcode })
+    let product = null
+    try {
+      product = await Product.findOne({ barcode })
+    } catch (mongoErr) {
+      console.warn('MongoDB unavailable for product lookup, skipping local DB:', mongoErr.message)
+    }
     if (product) {
       // Check recyclability - wait for it to complete before returning
       console.log(`Checking recyclability for product: ${product.name}, brand: ${product.brand}, category: ${product.category}`)
@@ -1690,11 +1757,14 @@ function startServer() {
 startServer()
 
 // Seed in background — do not block server start
-Promise.all([ensureDemoUser(), ensureTrashCans(), fixAdminRoles()]).then(() => {
-  console.log('Database seeding completed')
-}).catch(err => {
-  console.error('Startup error:', err)
-})
+;(async () => {
+  try {
+    await Promise.all([ensureDemoUser(), ensureTrashCans(), fixAdminRoles()])
+    console.log('Seeding complete')
+  } catch (err) {
+    console.warn('Seeding failed (server still running):', err.message)
+  }
+})()
 
 // Anti-fraud notes (code comments):
 // - We compute a SHA256 imageHash and reject duplicate uploads with the same hash.

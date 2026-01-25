@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5, user-scalable=yes, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <title>ClearCycle</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -771,8 +774,15 @@
   </div>
 
   <script>
-    const API = (/^(http:\/\/localhost|http:\/\/127\.0\.0\.1):3000$/.test(window.location.origin)) ? 'http://localhost:4000' : '';
+    // Same origin: app and API on same server (single-server mode for phone support)
+    const API = '';
     const authState = { user: null, token: null };
+    async function safeJson(res) {
+      const text = await res.text();
+      try { return JSON.parse(text); } catch (e) {
+        throw new Error('Server returned invalid response. Is the backend running? Use npm run start-https.');
+      }
+    }
     const state = { 
       points: 0, 
       streak: 0, 
@@ -1713,7 +1723,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email })
         });
-        const startData = await startRes.json();
+        const startData = await safeJson(startRes);
         if (!startRes.ok || !startData.sessionId) {
           throw new Error(startData.error || 'Failed to start session');
         }
@@ -1725,7 +1735,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ barcode: state.pendingBarcode })
         });
-        const productResData = await productRes.json();
+        const productResData = await safeJson(productRes);
         if (!productRes.ok) {
           throw new Error(productResData.error || 'Failed to submit product');
         }
@@ -1795,26 +1805,66 @@
         }
       }
       
-      document.getElementById('trashCanConfirmModal').classList.add('show');
+      const modal = document.getElementById('trashCanConfirmModal');
+      if (modal) {
+        modal.classList.add('show');
+        console.log('Trash can modal shown');
+      } else {
+        console.error('Trash can modal element not found');
+      }
     }
     function closeTrashCanModal() {
       document.getElementById('trashCanConfirmModal').classList.remove('show');
     }
     async function confirmTrashCanYes() {
-      if (!state.recycleSession || !state.pendingBarcode) {
+      console.log('confirmTrashCanYes called', { 
+        recycleSession: state.recycleSession, 
+        pendingBarcode: state.pendingBarcode 
+      });
+      
+      // Ensure we have a session - create one if missing
+      if (!state.recycleSession) {
+        console.log('No session found, creating one...');
+        const email = authState.user?.email || 'demo@clear.cycle';
+        try {
+          const startRes = await fetch(API + '/api/recycle/session/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+          });
+          const startData = await safeJson(startRes);
+          if (!startRes.ok || !startData.sessionId) {
+            throw new Error(startData.error || 'Failed to start session');
+          }
+          state.recycleSession = startData.sessionId;
+          console.log('Created new session:', state.recycleSession);
+        } catch (err) {
+          console.error('Failed to create session:', err);
+          alert('Error: ' + (err.message || 'Failed to start session'));
+          closeTrashCanModal();
+          return;
+        }
+      }
+      
+      if (!state.pendingBarcode) {
+        console.error('No pending barcode found');
+        alert('Error: No trash can barcode found. Please scan again.');
         closeTrashCanModal();
         return;
       }
+      
       try {
+        console.log('Submitting bin:', { session: state.recycleSession, barcode: state.pendingBarcode });
         const binRes = await fetch(API + '/api/recycle/session/' + state.recycleSession + '/bin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ barcode: state.pendingBarcode })
         });
-        const binData = await binRes.json();
+        const binData = await safeJson(binRes);
         if (!binRes.ok) {
           throw new Error(binData.error || 'Failed to submit trash can');
         }
+        console.log('Bin confirmed successfully');
         state.recycleStep = 'video';
         state.pendingBarcode = null;
         closeTrashCanModal();
@@ -1823,10 +1873,17 @@
         updateScanSteps();
         // Show video recording modal
         setTimeout(() => {
-          document.getElementById('videoRecordModal').classList.add('show');
-          setupVideoRecording();
+          const videoModal = document.getElementById('videoRecordModal');
+          if (videoModal) {
+            videoModal.classList.add('show');
+            setupVideoRecording();
+          } else {
+            console.error('Video modal not found');
+            alert('Video recording modal not found');
+          }
         }, 500);
       } catch (err) {
+        console.error('Error confirming trash can:', err);
         alert('Error: ' + (err.message || 'Failed to confirm trash can'));
         closeTrashCanModal();
       }
@@ -1839,178 +1896,184 @@
     }
 
     const reader = new (typeof ZXing !== 'undefined' ? ZXing : window.ZXing).BrowserMultiFormatReader();
+    let scanStream = null;
+    
+    function cameraRequiresHttpsMessage() {
+      const onPhone = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      const base = 'Camera requires HTTPS. ';
+      if (onPhone) return base + 'Run ./start-https.sh, then open the 📱 HTTPS URL on this phone (same Wi‑Fi) and accept the cert. See RUN_APP.md.';
+      return base + 'Run ./start-https.sh and use the HTTPS URL, or see RUN_APP.md.';
+    }
+
+    async function getVideoStreamWithRearCamera() {
+      const md = navigator.mediaDevices;
+      if (!md || !md.getUserMedia) return null;
+      const opts = { video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+      try {
+        return await md.getUserMedia(opts);
+      } catch (e) {
+        try { return await md.getUserMedia({ video: true, audio: false }); } catch (_) { throw e; }
+      }
+    }
+    
     function startScan() {
       if (state.isScanning) return;
       const video = document.getElementById('video');
       if (!video) return;
-      state.isScanning = true;
       const status = document.getElementById('status');
       const btn = document.getElementById('scanBtn');
-      
-      // Determine what we're scanning based on current step
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        if (status) status.textContent = cameraRequiresHttpsMessage();
+        return;
+      }
+      if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+      video.srcObject = null;
+      state.isScanning = true;
       const currentStep = state.recycleStep || 'product';
       if (status) {
         status.textContent = currentStep === 'product' ? 'Starting camera...' : 'Scanning QR code...';
       }
       if (btn) btn.disabled = true;
       
-      reader.decodeFromVideoDevice(undefined, video, (result, err) => {
-        if (result) {
-          state.isScanning = false;
-          if (btn) btn.disabled = false;
-          const barcode = result.getText();
-          try { reader.reset(); } catch (_) {}
-          if (video.srcObject) {
-            video.srcObject.getTracks().forEach(t => t.stop());
+      (async () => {
+        try {
+          scanStream = await getVideoStreamWithRearCamera();
+          if (status) status.textContent = currentStep === 'product' ? 'Point at barcode' : 'Point at trash can QR';
+          await reader.decodeFromStream(scanStream, video, (result, err) => {
+            if (!result) return;
+            state.isScanning = false;
+            if (btn) btn.disabled = false;
+            const barcode = result.getText();
+            try { reader.reset(); } catch (_) {}
+            if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
             video.srcObject = null;
-          }
-          
-          if (currentStep === 'product') {
-            // Step 1: Product scan
-            if (status) status.textContent = 'Looking up product...';
             
-            // Use a timeout to prevent hanging
-            const fetchWithTimeout = (url, timeout = 10000) => {
-              return Promise.race([
-                fetch(url),
-                new Promise((_, reject) => 
-                  setTimeout(() => reject(new Error('Request timeout')), timeout)
-                )
-              ]);
-            };
-            
-            fetchWithTimeout(API + '/api/product?barcode=' + encodeURIComponent(barcode))
-              .then(r => {
-                if (!r.ok) {
-                  // If API returns error, still try to parse JSON for error message
-                  return r.json().then(errData => {
-                    // Return a not-found response instead of throwing
-                    return { found: false, error: errData.error || 'Product not found' };
-                  }).catch(() => {
-                    // Return not-found if can't parse error
-                    return { found: false, error: 'Product lookup failed' };
+            if (currentStep === 'product') {
+              // Step 1: Product scan
+              if (status) status.textContent = 'Looking up product...';
+              
+              // Use a timeout to prevent hanging
+              const fetchWithTimeout = (url, timeout = 10000) => {
+                return Promise.race([
+                  fetch(url),
+                  new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Request timeout')), timeout)
+                  )
+                ]);
+              };
+              
+              fetchWithTimeout(API + '/api/product?barcode=' + encodeURIComponent(barcode))
+                .then(async (r) => {
+                  const data = await safeJson(r).catch(() => ({ found: false, error: 'Product lookup failed' }));
+                  if (!r.ok) return { found: false, error: data.error || 'Product not found' };
+                  return data;
+                })
+                .then(data => {
+                  console.log('Product API response:', JSON.stringify(data, null, 2));
+                  console.log('Recyclability data:', {
+                    recyclable: data.recyclable,
+                    message: data.recyclabilityMessage,
+                    confidence: data.recyclabilityConfidence
                   });
-                }
-                return r.json();
-              })
-              .then(data => {
-                console.log('Product API response:', JSON.stringify(data, null, 2));
-                console.log('Recyclability data:', {
-                  recyclable: data.recyclable,
-                  message: data.recyclabilityMessage,
-                  confidence: data.recyclabilityConfidence
+                  // Always show the modal - even if product not found, user can still proceed
+                  if (data && data.found !== false && data.name && data.name.trim() && data.name !== 'Unknown') {
+                    // Product found with valid name - show it
+                    const productData = {
+                      name: data.name.trim(),
+                      brand: (data.brand && data.brand.trim()) || 'Unknown',
+                      category: (data.category && data.category.trim()) || 'Unknown',
+                      image: data.image || null,
+                      recyclable: data.recyclable,
+                      recyclabilityMessage: data.recyclabilityMessage,
+                      recyclabilityConfidence: data.recyclabilityConfidence
+                    };
+                    console.log('Showing product with name:', productData.name, 'recyclable:', productData.recyclable);
+                    showProductModal(productData, barcode);
+                  } else {
+                    // Product not found or name is Unknown - show fallback
+                    const productData = {
+                      name: data.name || 'Unknown Product',
+                      brand: (data.brand && data.brand.trim()) || 'Unknown',
+                      category: (data.category && data.category.trim()) || 'Unknown',
+                      image: data.image || null,
+                      recyclable: data.recyclable,
+                      recyclabilityMessage: data.recyclabilityMessage,
+                      recyclabilityConfidence: data.recyclabilityConfidence
+                    };
+                    console.log('Showing product (fallback name):', productData.name, 'recyclable:', productData.recyclable);
+                    showProductModal(productData, barcode);
+                  }
+                })
+                .catch(err => {
+                  console.error('Product lookup error:', err);
+                  if (status) status.textContent = 'Product lookup failed. Try again.';
+                  if (btn) btn.disabled = false;
+                  state.isScanning = false;
                 });
-                // Always show the modal - even if product not found, user can still proceed
-                if (data && data.found !== false && data.name && data.name.trim() && data.name !== 'Unknown') {
-                  // Product found with valid name - show it
-                  const productData = {
-                    name: data.name.trim(),
-                    brand: (data.brand && data.brand.trim()) || 'Unknown',
-                    category: (data.category && data.category.trim()) || 'Unknown',
-                    image: data.image || null,
-                    recyclable: data.recyclable !== undefined ? data.recyclable : null,
-                    recyclabilityMessage: data.recyclabilityMessage || null,
-                    recyclabilityConfidence: data.recyclabilityConfidence || 0
-                  };
-                  console.log('Showing product with name:', productData.name, 'recyclable:', productData.recyclable);
-                  showProductModal(productData, barcode);
-                  if (status) status.textContent = 'Confirm product to continue';
-                } else if (data && data.found === true && data.name) {
-                  // Product found but name might be empty - try to use brand
-                  const productName = (data.name && data.name.trim() && data.name !== 'Unknown') 
-                    ? data.name.trim() 
-                    : ((data.brand && data.brand.trim()) ? data.brand.trim() : `Product (Barcode: ${barcode})`);
-                  const productData = {
-                    name: productName,
-                    brand: (data.brand && data.brand.trim()) || 'Unknown',
-                    category: (data.category && data.category.trim()) || 'Unknown',
-                    image: data.image || null,
-                    recyclable: data.recyclable !== undefined ? data.recyclable : null,
-                    recyclabilityMessage: data.recyclabilityMessage || null,
-                    recyclabilityConfidence: data.recyclabilityConfidence || 0
-                  };
-                  console.log('Showing product (fallback name):', productData.name, 'recyclable:', productData.recyclable);
-                  showProductModal(productData, barcode);
-                  if (status) status.textContent = 'Confirm product to continue';
-                } else {
-                  // Product not found or invalid - show modal with barcode
-                  console.log('Product not found, showing fallback');
-                  showProductModal({
-                    name: `Product (Barcode: ${barcode})`,
-                    brand: 'Unknown',
-                    category: 'Unknown',
-                    image: null,
-                    recyclable: null,
-                    recyclabilityMessage: null,
-                    recyclabilityConfidence: 0
-                  }, barcode);
-                  if (status) status.textContent = 'Product not found. Confirm to continue.';
-                }
-              })
-              .catch((err) => {
-                console.error('Product lookup error:', err);
-                // Show modal with barcode even on error - allow user to proceed
-                // Silently handle the error - don't show alerts
-                showProductModal({
-                  name: `Product (Barcode: ${barcode})`,
-                  brand: 'Unknown',
-                  category: 'Unknown',
-                  image: null,
-                  recyclable: null,
-                  recyclabilityMessage: null,
-                  recyclabilityConfidence: 0
-                }, barcode);
-                if (status) status.textContent = 'Product details unavailable. Confirm to continue.';
-              });
-          } else if (currentStep === 'bin') {
-            // Step 2: QR code scan for trash can
-            // Extract can ID from QR code - could be just "TC001" or a URL like "/can/TC001"
-            let canId = barcode;
-            if (barcode.includes('/can/')) {
-              // Extract from URL format
-              const match = barcode.match(/\/can\/([^\/\s]+)/);
-              if (match) canId = match[1];
-            } else if (barcode.includes('canId=')) {
-              // Extract from query param format
-              const match = barcode.match(/canId=([^&\s]+)/);
-              if (match) canId = decodeURIComponent(match[1]);
-            }
-            // Clean up the can ID
-            canId = canId.trim();
-            state.pendingBarcode = canId;
-            
-            if (status) status.textContent = 'Looking up trash can...';
-            fetch(API + '/api/trash-cans/' + encodeURIComponent(canId))
-              .then(r => {
-                if (!r.ok && r.status === 404) {
-                  // In demo mode, still allow it
-                  if (status) status.textContent = 'Trash can not found, but continuing in demo mode...';
+            } else if (currentStep === 'bin') {
+              // Step 2: Bin QR scan
+              // Extract can ID from QR code - could be just "TC001" or a URL like "/can/TC001"
+              let canId = barcode;
+              if (barcode.includes('/can/')) {
+                // Extract from URL format
+                const match = barcode.match(/\/can\/([^\/\s]+)/);
+                if (match) canId = match[1];
+              } else if (barcode.includes('canId=')) {
+                // Extract from query param format
+                const match = barcode.match(/canId=([^&\s]+)/);
+                if (match) canId = decodeURIComponent(match[1]);
+              }
+              // Clean up the can ID
+              canId = canId.trim();
+              state.pendingBarcode = canId;
+              
+              if (status) status.textContent = 'Verifying bin...';
+              fetch(API + '/api/trash-cans/' + encodeURIComponent(canId))
+                .then(async (r) => {
+                  const data = await safeJson(r).catch(() => ({ found: false, error: 'Bin lookup failed' }));
+                  if (!r.ok) {
+                    // Even if not found, allow demo mode
+                    if (status) status.textContent = 'Trash can not found, but continuing in demo mode...';
+                    showTrashCanModal(canId, 'Unknown Trash Can', 'Unknown location', null);
+                    return null;
+                  }
+                  return data;
+                })
+                .then(data => {
+                  console.log('Bin lookup response:', data);
+                  if (data) {
+                    // Data found - extract fields
+                    const can = data.can || data;
+                    const finalCanId = can.id || canId;
+                    const label = can.label || 'Unknown Trash Can';
+                    const location = can.location || 'Unknown location';
+                    const imageUrl = can.image || null;
+                    console.log('Showing trash can modal:', { finalCanId, label, location, imageUrl, pendingBarcode: state.pendingBarcode, recycleSession: state.recycleSession });
+                    showTrashCanModal(finalCanId, label, location, imageUrl);
+                  } else {
+                    // Data is null, modal was already shown above for 404 case
+                    console.log('Bin not found, modal already shown');
+                  }
+                  if (btn) btn.disabled = false;
+                  state.isScanning = false;
+                })
+                .catch(err => {
+                  console.error('Bin lookup error:', err);
+                  // Still show modal even if can not found (for demo mode)
                   showTrashCanModal(canId, 'Unknown Trash Can', 'Unknown location', null);
-                  return;
-                }
-                return r.json();
-              })
-              .then(data => {
-                if (!data) return; // Already handled above
-                const can = data.can || data;
-                // Make sure we have the can ID (should be TC001, TC002, etc.)
-                const finalCanId = can.id || canId;
-                showTrashCanModal(finalCanId, can.label, can.location, can.image);
-                if (status) status.textContent = 'Confirm trash can to continue';
-              })
-              .catch((err) => {
-                console.error('Error fetching trash can:', err);
-                // Still show modal even if can not found (for demo mode)
-                showTrashCanModal(canId, 'Unknown Trash Can', 'Unknown location', null);
-                if (status) status.textContent = 'Confirm trash can to continue';
-              });
-          }
+                  if (status) status.textContent = 'Confirm trash can to continue';
+                  if (btn) btn.disabled = false;
+                  state.isScanning = false;
+                });
+            }
+          });
+        } catch (err) {
+          console.error('Camera error:', err);
+          if (status) status.textContent = 'Camera error: ' + err.message;
+          if (btn) btn.disabled = false;
+          state.isScanning = false;
         }
-      }).catch(e => {
-        state.isScanning = false;
-        if (btn) btn.disabled = false;
-        if (status) status.textContent = 'Camera error: ' + (e.message || 'Could not start');
-      });
+      })();
     }
     
     let videoTimerInterval = null;
@@ -2018,8 +2081,13 @@
     async function setupVideoRecording() {
       const recordVideo = document.getElementById('recordVideo');
       if (!recordVideo) return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert(cameraRequiresHttpsMessage());
+        cancelVideoRecording();
+        return;
+      }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const stream = await getVideoStreamWithRearCamera();
         recordVideo.srcObject = stream;
       } catch (err) {
         alert('Camera access denied: ' + err.message);
@@ -2498,11 +2566,11 @@
         const res = await Promise.race([uploadPromise, uploadTimeout]);
         
         if (!res.ok) {
-          const errorData = await res.json().catch(() => ({ error: 'Upload failed' }));
+          const errorData = await safeJson(res).catch(() => ({ error: 'Upload failed' }));
           throw new Error(errorData.error || `Upload failed: ${res.status}`);
         }
         
-        const data = await res.json();
+        const data = await safeJson(res);
         console.log('Verification response:', JSON.stringify(data, null, 2));
         
         // Make sure we have valid data
