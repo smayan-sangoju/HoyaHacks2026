@@ -6,6 +6,28 @@ The project focuses on accountability, accessibility, and scalability in recycli
 
 ---
 
+```mermaid
+flowchart LR
+    User[User<br/>Browser / Mobile]
+
+    Frontend[Frontend<br/>HTML • Tailwind • JS]
+    Backend[Backend API<br/>Node.js • Express]
+
+    DB[(MongoDB)]
+
+    ProductAPI[Product APIs<br/>OpenFoodFacts / Fallback]
+    VisionAPI[Vision Model<br/>Gemini / OpenRouter]
+
+    User -->|Barcode Scan<br/>QR Scan<br/>Video Capture| Frontend
+    Frontend -->|REST Requests| Backend
+
+    Backend -->|Store / Fetch| DB
+    Backend -->|Product Lookup| ProductAPI
+    Backend -->|Optional Video Verification| VisionAPI
+
+    Backend -->|Verification Result<br/>Points Awarded| Frontend
+```
+
 ## Project Goals
 
 - Encourage correct disposal of recyclable items  
