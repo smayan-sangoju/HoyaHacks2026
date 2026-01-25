@@ -6,6 +6,7 @@ The project focuses on accountability, accessibility, and scalability in recycli
 
 ---
 
+## Architecture
 ```mermaid
 flowchart LR
     User[User<br/>Browser / Mobile]
